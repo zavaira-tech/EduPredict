@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Avatar,
   Badge,
@@ -145,12 +145,25 @@ export default function AppLayout({
   const [notificationAnchor, setNotificationAnchor] = useState(null);
   const [profileAnchor, setProfileAnchor] = useState(null);
   const [notifications, setNotifications] = useState(initialNotifications);
+  const searchInputRef = useRef(null);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("lg"));
   const location = useLocation();
 
   const pageTitle = useMemo(() => pageTitles[location.pathname] || "Dashboard", [location.pathname]);
   const unreadCount = notifications.filter((notification) => !notification.read).length;
+
+  useEffect(() => {
+    const handleSearchShortcut = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+
+    window.addEventListener("keydown", handleSearchShortcut);
+    return () => window.removeEventListener("keydown", handleSearchShortcut);
+  }, []);
 
   const markRead = (id) => {
     setNotifications((current) =>
@@ -200,12 +213,13 @@ export default function AppLayout({
               size="small"
               placeholder="Search anything..."
               value={search}
+              inputRef={searchInputRef}
               onChange={(event) => onSearchChange(event.target.value)}
               className="global-search"
               inputProps={{ "aria-label": "Search dashboard and students" }}
               InputProps={{
                 startAdornment: <InputAdornment position="start"><Search size={16} /></InputAdornment>,
-                endAdornment: <InputAdornment position="end"><kbd>⌘ K</kbd></InputAdornment>,
+                endAdornment: <InputAdornment position="end"><kbd>Ctrl K</kbd></InputAdornment>,
               }}
             />
             <div className="role-preview">
