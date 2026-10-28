@@ -1,0 +1,32 @@
+# Environment files
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Node.js
+node_modules/
+frontend/dist/
+backend/coverage/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Local data and generated output
+datasets/raw/*
+datasets/processed/*
+!datasets/raw/.gitkeep
+!datasets/processed/.gitkeep
+*.log
+
+# IDE and operating system
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+Thumbs.db
