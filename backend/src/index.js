@@ -1,17 +1,26 @@
 import cors from "cors";
 import dotenv from "dotenv";
 import express from "express";
-import { connectToDatabase } from "./config/database.js";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import mongoose, { connectToDatabase } from "./config/db.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import healthRouter from "./routes/health.js";
 
-dotenv.config();
+dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
 
-const { MONGO_URI, CORS_ORIGIN } = process.env;
+const { CORS_ORIGIN } = process.env;
+const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
 const port = Number(process.env.PORT || 5000);
 
-if (!MONGO_URI) {
-  throw new Error("MONGO_URI is required. Create backend/.env from .env.example.");
+if (!mongoUri) {
+  throw new Error("MONGODB_URI is required. Create backend/.env from .env.example.");
+}
+
+if (mongoUri.includes("<URL_ENCODED_PASSWORD>")) {
+  throw new Error(
+    "Replace the password placeholder in backend/.env with your URL-encoded database password.",
+  );
 }
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -31,11 +40,22 @@ app.use(notFoundHandler);
 app.use(errorHandler);
 
 try {
-  await connectToDatabase(MONGO_URI);
+  await connectToDatabase(mongoUri);
+  console.log(`MongoDB connected successfully (database: ${mongoose.connection.name}).`);
   app.listen(port, () => {
     console.log(`EduPredict API listening on http://localhost:${port}`);
   });
 } catch (error) {
-  console.error("Unable to start EduPredict API:", error);
+  const reason = error instanceof Error ? error.name : "UnknownError";
+  console.error(
+    `Unable to connect to MongoDB (${reason}). Check the Atlas URI, database user, Network Access IP list, and cluster status. Credentials are not shown.`,
+  );
+  try {
+    await mongoose.disconnect();
+  } catch (cleanupError) {
+    const cleanupReason =
+      cleanupError instanceof Error ? cleanupError.name : "UnknownError";
+    console.error(`MongoDB cleanup failed (${cleanupReason}).`);
+  }
   process.exitCode = 1;
 }

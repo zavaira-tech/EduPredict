@@ -4,9 +4,12 @@ import mongoose from "mongoose";
 const router = Router();
 
 router.get("/", (req, res) => {
-  res.json({
-    status: "ok",
-    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  const databaseConnected = mongoose.connection.readyState === 1;
+
+  res.status(databaseConnected ? 200 : 503).json({
+    status: databaseConnected ? "ok" : "degraded",
+    server: "running",
+    database: databaseConnected ? "connected" : "disconnected",
     timestamp: new Date().toISOString(),
   });
 });

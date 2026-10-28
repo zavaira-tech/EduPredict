@@ -397,9 +397,74 @@ The response contains `"status": "ok"` and `"database": "connected"`.
 
 ### Environment variables
 
-`backend/.env.example` contains local API port, MongoDB URI, and allowed
+`backend/.env.example` contains the Atlas URI template, API port, and allowed
 frontend origin. `frontend/.env.example` contains the API base URL. Never put
 passwords, JWT signing keys, or production secrets in committed files.
+
+### Connect the backend to MongoDB Atlas
+
+The backend loads `backend/.env` explicitly, connects through Mongoose before
+opening the HTTP port, and reports database status at `/api/health`. Atlas
+credentials must be entered only in the ignored local `backend/.env` file.
+`backend/.env.example` intentionally contains a password placeholder.
+
+1. In MongoDB Atlas, create/verify the database user
+   `zavaira2312f_db_user`, ensure it has read/write access to the `edupredict`
+   database, and add your current public IP under **Security > Network Access**.
+   Allow a few minutes for a new access-list rule to apply.
+2. Open `backend/.env` in VS Code. Keep the existing `PORT` and `CORS_ORIGIN`
+   lines, and set `MONGODB_URI` to the Atlas URI shown in
+   `backend/.env.example`, replacing `<URL_ENCODED_PASSWORD>` locally with the
+   database user's password. Do not send the password in chat, add it to source
+   files, or commit `.env`. If the password contains URI-reserved characters,
+   percent-encode the password portion only (for example `@` becomes `%40`).
+3. If you have not created `backend/.env`, copy the template in PowerShell:
+
+   ```powershell
+   Copy-Item backend\.env.example backend\.env
+   ```
+
+4. Install dependencies and start the backend from the backend directory:
+
+   ```powershell
+   Set-Location backend
+   npm install
+   npm run dev
+   ```
+
+   A successful connection prints the database name and API address, not the
+   connection string or password. The API starts listening only after MongoDB
+   connects.
+5. Test in a browser at <http://localhost:5000/api/health>, or from PowerShell:
+
+   ```powershell
+   Invoke-RestMethod http://localhost:5000/api/health
+   ```
+
+   When connected, the JSON includes `"status": "ok"`, `"server": "running"`,
+   and `"database": "connected"`. The equivalent Postman request is `GET
+   http://localhost:5000/api/health`.
+
+If connection fails, check in this order:
+
+1. Confirm the Atlas database username and password. Use the **database
+   user's** credentials, not your Atlas website login.
+2. Percent-encode reserved characters in the password portion of the URI.
+   Do not encode the whole connection string.
+3. Add the current public IP under Atlas **Network Access**. Avoid opening
+   access to every IP except temporarily in a controlled environment.
+4. Confirm the database user has read/write permissions for `edupredict`.
+5. Confirm the Atlas cluster is available and finished provisioning.
+6. Confirm the edited file is `backend/.env`, next to `backend/package.json`.
+   The backend loads that path explicitly with `dotenv`; restart the backend
+   after edits.
+7. Check the `mongodb+srv://` URI uses host
+   `cluster0.fozedbv.mongodb.net`, database `edupredict`, and the provided
+   retry/write/app-name options. Do not paste credentials into logs or issue
+   reports.
+
+`MONGODB_URI` is the preferred variable. The backend temporarily accepts the
+previous `MONGO_URI` name for compatibility with the existing local setup.
 
 ### Troubleshooting
 
@@ -407,8 +472,9 @@ passwords, JWT signing keys, or production secrets in committed files.
   PATH/`JAVA_HOME`, and open a new terminal.
 - **MongoDB connection refused:** start the MongoDB service and confirm the URI
   port matches the service listener.
-- **Backend says `MONGO_URI is required`:** create `backend\.env` from the
-  example and run `npm run dev` from `backend`.
+- **Backend says `MONGODB_URI is required`:** create `backend\.env` from the
+  example, replace the Atlas password placeholder locally, and run `npm run dev`
+  from `backend`.
 - **Frontend cannot reach API:** ensure both processes are running; check
   `VITE_API_BASE_URL` and `CORS_ORIGIN`, then restart Vite after editing env.
 - **Python activation blocked:** use the execution-policy command above or
