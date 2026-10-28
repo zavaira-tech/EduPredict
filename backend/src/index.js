@@ -27,13 +27,11 @@ if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be an integer between 1 and 65535.");
 }
 
-if (!CORS_ORIGIN) {
-  throw new Error("CORS_ORIGIN is required. Create backend/.env from .env.example.");
-}
-
 const app = express();
 
-app.use(cors({ origin: CORS_ORIGIN }));
+if (CORS_ORIGIN) {
+  app.use(cors({ origin: CORS_ORIGIN }));
+}
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/health", healthRouter);
 app.use(notFoundHandler);
@@ -42,9 +40,6 @@ app.use(errorHandler);
 try {
   await connectToDatabase(mongoUri);
   console.log(`MongoDB connected successfully (database: ${mongoose.connection.name}).`);
-  app.listen(port, () => {
-    console.log(`EduPredict API listening on http://localhost:${port}`);
-  });
 } catch (error) {
   const reason = error instanceof Error ? error.name : "UnknownError";
   console.error(
@@ -57,5 +52,13 @@ try {
       cleanupError instanceof Error ? cleanupError.name : "UnknownError";
     console.error(`MongoDB cleanup failed (${cleanupReason}).`);
   }
-  process.exitCode = 1;
+  throw new Error("MongoDB connection failed; check the server environment configuration.");
 }
+
+if (process.env.VERCEL !== "1") {
+  app.listen(port, () => {
+    console.log(`EduPredict API listening on http://localhost:${port}`);
+  });
+}
+
+export default app;

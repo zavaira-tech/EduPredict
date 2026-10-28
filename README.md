@@ -466,6 +466,31 @@ If connection fails, check in this order:
 `MONGODB_URI` is the preferred variable. The backend temporarily accepts the
 previous `MONGO_URI` name for compatibility with the existing local setup.
 
+## Deploy as Vercel Services
+
+The root `vercel.json` configures two services:
+
+- `backend` uses the Express framework and `backend/src/index.js`. `/api/*`
+  requests are publicly routed to it.
+- `frontend` uses Vite. Remaining paths are publicly routed to its built SPA.
+
+The backend exports its Express app for Vercel Functions and only opens a
+listening port for local Node.js runs. The Vite client calls the local backend
+at `http://localhost:5000/api` in development and same-origin `/api` after
+production build, so the browser does not need a runtime service binding.
+There are currently **no service bindings**: the frontend is a static browser
+app (not a server-side service), and the backend does not call another service.
+
+To deploy, import this repository into Vercel with the repository root as the
+project root, then set `MONGODB_URI` in the backend service's Vercel environment
+variables for each required deployment environment. Use the Atlas URI and
+credentials configured privately for this project; never add them to Git or
+`vercel.json`. `CORS_ORIGIN` is optional when using the same-origin `/api`
+rewrite. Set it only if the API should accept browser requests from a separate
+origin. The Vercel CLI's `vercel dev` can be used to exercise the configured
+services locally; service support may depend on the Vercel CLI version/account
+availability.
+
 ### Troubleshooting
 
 - **`node`, `npm`, `py`, or `java` not recognized:** finish installation, check
