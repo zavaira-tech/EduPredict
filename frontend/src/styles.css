@@ -270,6 +270,27 @@ button { cursor: pointer; }
 .page-placeholder .eyebrow { color: #6684ca; font-size: 9px; letter-spacing: 1px; font-weight: 700; }
 .page-placeholder h1 { font: 800 26px Inter, "Segoe UI", sans-serif; margin: 12px 0 8px; color: var(--navy); }
 .page-placeholder p { color: var(--muted); font-size: 12px; max-width: 480px; line-height: 1.7; }
+.role-preview strong { color: var(--navy); font-size: 10px; text-transform: capitalize; }
+.auth-screen { min-height: 100vh; display: grid; place-items: center; padding: 22px; background: var(--canvas); }
+.auth-card { width: min(100%, 420px); padding: 30px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); }
+.auth-brand { margin-bottom: 20px; font-size: 22px; font-weight: 800; }
+.auth-card h1 { margin: 0 0 8px; color: var(--navy); font-size: 22px; }
+.auth-card > p { margin: 0 0 20px; color: var(--muted); font-size: 12px; }
+.auth-form { display: grid; gap: 14px; margin-top: 18px; }
+.auth-switch { display: block; margin: 18px auto 0; border: 0; background: none; color: #356ae6; font-size: 12px; }
+.resource-table-panel { overflow-x: auto; border: 1px solid var(--line); background: var(--paper); }
+.resource-empty { padding: 38px; text-align: center; color: var(--muted); }
+.resource-empty h2 { margin: 0 0 8px; color: var(--navy); font-size: 18px; }
+.resource-empty p { font-size: 12px; }
+.resource-form { display: grid; gap: 14px; padding-top: 10px !important; }
+.account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.account-panel { padding: 22px; border: 1px solid var(--line); background: var(--paper); }
+.account-panel h2 { margin: 0 0 8px; color: var(--navy); font-size: 16px; }
+.account-panel > p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
+.analytics-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+.analytics-panel { min-width: 0; padding: 18px; border: 1px solid var(--line); background: var(--paper); }
+.analytics-panel:last-child { grid-column: 1 / -1; }
+.analytics-chart { width: 100%; height: 280px; margin-top: 15px; }
 
 @media (max-width: 1320px) {
   .desktop-sidebar { width: 235px; min-width: 235px; }
@@ -288,6 +309,9 @@ button { cursor: pointer; }
   .chart-grid-top { grid-template-columns: minmax(0, 1.3fr) minmax(275px, .9fr); }
 }
 @media (max-width: 860px) {
+  .account-grid { grid-template-columns: 1fr; }
+  .analytics-grid { grid-template-columns: 1fr; }
+  .analytics-panel:last-child { grid-column: auto; }
   .topbar { height: 65px; padding: 0 13px; }
   .topbar-breadcrumb { display: none; }
   .topbar-title { font-size: 14px !important; }

@@ -11,7 +11,6 @@ import {
   Menu,
   MenuItem,
   Popover,
-  Select,
   TextField,
   Tooltip,
   Typography,
@@ -40,17 +39,19 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { NavLink, useLocation } from "react-router-dom";
-import { initialNotifications } from "../../data/mockData.js";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import api from "../../services/api.js";
 
 const navigation = [
   {
     label: "WORKSPACE",
     items: [
       { title: "Dashboard", path: "/", icon: LayoutDashboard },
-      { title: "Students", path: "/students", icon: Users },
-      { title: "Teachers", path: "/teachers", icon: UserRound },
+      { title: "Users", path: "/users", icon: Users, roles: ["admin"] },
+      { title: "Students", path: "/students", icon: Users, roles: ["admin", "teacher"] },
+      { title: "Teachers", path: "/teachers", icon: UserRound, roles: ["admin", "teacher"] },
       { title: "Courses", path: "/courses", icon: BookOpen },
+      { title: "Enrollments", path: "/enrollments", icon: Users, roles: ["admin", "teacher", "student", "analyst"] },
       { title: "Attendance", path: "/attendance", icon: Activity },
       { title: "Performance", path: "/performance", icon: GraduationCap },
     ],
@@ -59,17 +60,17 @@ const navigation = [
     label: "INSIGHTS",
     items: [
       { title: "Predictions", path: "/predictions", icon: BarChart3, badge: "NEW" },
-      { title: "Anomaly detection", path: "/anomalies", icon: ShieldAlert },
-      { title: "Analytics & reports", path: "/analytics", icon: FileChartColumn },
-      { title: "Datasets", path: "/datasets", icon: Database },
+      { title: "Anomaly detection", path: "/anomalies", icon: ShieldAlert, roles: ["admin", "analyst"] },
+      { title: "Analytics & reports", path: "/analytics", icon: FileChartColumn, roles: ["admin", "analyst"] },
+      { title: "Datasets", path: "/datasets", icon: Database, roles: ["admin", "analyst"] },
     ],
   },
   {
     label: "SUPPORT",
     items: [
-      { title: "Alerts & notifications", path: "/alerts", icon: Bell, badge: "4" },
-      { title: "Support center", path: "/support", icon: CircleHelp },
-      { title: "Settings", path: "/settings", icon: Settings },
+      { title: "Alerts & notifications", path: "/alerts", icon: Bell, roles: ["admin", "teacher", "student"] },
+      { title: "Support center", path: "/support", icon: CircleHelp, roles: ["admin", "teacher", "student"] },
+      { title: "Settings", path: "/settings", icon: Settings, roles: ["admin"] },
     ],
   },
 ];
@@ -77,8 +78,10 @@ const navigation = [
 const pageTitles = Object.fromEntries(
   navigation.flatMap((group) => group.items.map((item) => [item.path, item.title])),
 );
+pageTitles["/profile"] = "My profile";
 
-function SidebarContent({ onNavigate, role, onNotify }) {
+function SidebarContent({ onNavigate, role, user, onLogout, onNotify }) {
+  const initials = user?.name?.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "EP";
   return (
     <div className="sidebar-inner">
       <NavLink to="/" className="brand-lockup" onClick={onNavigate}>
@@ -88,41 +91,45 @@ function SidebarContent({ onNavigate, role, onNotify }) {
 
       <div className="workspace-switcher">
         <div className="workspace-avatar">NU</div>
-        <div className="workspace-copy"><strong>Northstar University</strong><span>Institution workspace</span></div>
+        <div className="workspace-copy"><strong>EduPredict</strong><span>Institution workspace</span></div>
         <ChevronDown size={15} />
       </div>
 
       <nav className="sidebar-nav" aria-label="Main navigation">
-        {navigation.map((group) => (
-          <div className="nav-group" key={group.label}>
-            <div className="nav-group-title">{group.label}</div>
-            {group.items.map(({ title, path, icon: Icon, badge }) => (
-              <NavLink
-                key={path}
-                to={path}
-                end={path === "/"}
-                onClick={onNavigate}
-                className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-              >
-                <Icon size={18} strokeWidth={1.8} />
-                <span>{title}</span>
-                {badge && <small className={`nav-badge ${badge === "NEW" ? "badge-new" : ""}`}>{badge}</small>}
-              </NavLink>
-            ))}
-          </div>
-        ))}
+        {navigation.map((group) => {
+          const visibleItems = group.items.filter((item) => !item.roles || item.roles.includes(role));
+          if (!visibleItems.length) return null;
+          return (
+            <div className="nav-group" key={group.label}>
+              <div className="nav-group-title">{group.label}</div>
+              {visibleItems.map(({ title, path, icon: Icon, badge }) => (
+                <NavLink
+                  key={path}
+                  to={path}
+                  end={path === "/"}
+                  onClick={onNavigate}
+                  className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+                >
+                  <Icon size={18} strokeWidth={1.8} />
+                  <span>{title}</span>
+                  {badge && <small className={`nav-badge ${badge === "NEW" ? "badge-new" : ""}`}>{badge}</small>}
+                </NavLink>
+              ))}
+            </div>
+          );
+        })}
       </nav>
 
       <div className="sidebar-bottom">
         <div className="help-card">
           <div className="help-card-icon"><CircleHelp size={17} /></div>
           <strong>Need a hand?</strong>
-          <span>Visit our help center for guides and support.</span>
-          <Button size="small" onClick={() => onNotify("Help center is a demo destination")}>Get help <span>→</span></Button>
+          <span>Visit the support workspace for assistance.</span>
+          <Button size="small" onClick={() => window.location.assign("/support")}>Get help <span>→</span></Button>
         </div>
-        <button className="profile-button" onClick={() => onNotify(`${role} demo profile`)}>
-          <Avatar className="profile-avatar">AJ</Avatar>
-          <span className="profile-copy"><strong>Alex Johnson</strong><small>{role}</small></span>
+        <button className="profile-button" onClick={onLogout} aria-label="Sign out">
+          <Avatar className="profile-avatar">{initials}</Avatar>
+          <span className="profile-copy"><strong>{user?.name}</strong><small>{role}</small></span>
           <LogOut size={16} className="profile-logout" />
         </button>
       </div>
@@ -135,8 +142,8 @@ export default function AppLayout({
   darkMode,
   onToggleTheme,
   role,
-  roles,
-  onRoleChange,
+  user,
+  onLogout,
   onNotify,
   search,
   onSearchChange,
@@ -144,11 +151,28 @@ export default function AppLayout({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [notificationAnchor, setNotificationAnchor] = useState(null);
   const [profileAnchor, setProfileAnchor] = useState(null);
-  const [notifications, setNotifications] = useState(initialNotifications);
+  const [notifications, setNotifications] = useState([]);
   const searchInputRef = useRef(null);
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("lg"));
   const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (role === "analyst") {
+      setNotifications([]);
+      return;
+    }
+    api.get("/alerts")
+      .then(({ data }) => setNotifications((data.data || []).map((item) => ({
+        id: item._id,
+        title: item.title,
+        text: item.message,
+        time: new Date(item.createdAt).toLocaleString(),
+        read: item.isRead,
+      }))))
+      .catch((error) => onNotify(error.response?.data?.message || "Unable to load notifications.", "error"));
+  }, [onNotify, role]);
 
   const pageTitle = useMemo(() => pageTitles[location.pathname] || "Dashboard", [location.pathname]);
   const unreadCount = notifications.filter((notification) => !notification.read).length;
@@ -165,22 +189,32 @@ export default function AppLayout({
     return () => window.removeEventListener("keydown", handleSearchShortcut);
   }, []);
 
-  const markRead = (id) => {
-    setNotifications((current) =>
-      current.map((notification) =>
-        notification.id === id ? { ...notification, read: true } : notification,
-      ),
-    );
+  const markRead = async (id) => {
+    try {
+      await api.put(`/alerts/${id}/read`);
+      setNotifications((current) =>
+        current.map((notification) => notification.id === id ? { ...notification, read: true } : notification),
+      );
+    } catch (error) {
+      onNotify(error.response?.data?.message || "Unable to update this notification.", "error");
+    }
   };
 
-  const markAllRead = () => {
-    setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
-    onNotify("All notifications marked as read");
+  const markAllRead = async () => {
+    try {
+      await Promise.all(notifications.filter((item) => !item.read).map((item) => api.put(`/alerts/${item.id}/read`)));
+      setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
+      onNotify("All notifications marked as read.");
+    } catch (error) {
+      onNotify(error.response?.data?.message || "Unable to mark notifications as read.", "error");
+    }
   };
 
   const sidebar = (
     <SidebarContent
       role={role}
+      user={user}
+      onLogout={onLogout}
       onNotify={onNotify}
       onNavigate={() => setMobileOpen(false)}
     />
@@ -222,19 +256,7 @@ export default function AppLayout({
                 endAdornment: <InputAdornment position="end"><kbd>Ctrl K</kbd></InputAdornment>,
               }}
             />
-            <div className="role-preview">
-              <span>Preview as</span>
-              <Select
-                size="small"
-                value={role}
-                onChange={(event) => onRoleChange(event.target.value)}
-                IconComponent={ChevronDown}
-                aria-label="Preview role"
-                className="role-select"
-              >
-                {roles.map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
-              </Select>
-            </div>
+            <div className="role-preview"><span>Signed in</span><strong>{role}</strong></div>
             <Tooltip title={darkMode ? "Switch to light mode" : "Switch to dark mode"}>
               <IconButton className="header-icon-button" aria-label="Toggle theme" onClick={onToggleTheme}>
                 {darkMode ? <Sun size={18} /> : <Moon size={18} />}
@@ -251,8 +273,8 @@ export default function AppLayout({
             </Tooltip>
             <Divider orientation="vertical" flexItem className="topbar-divider" />
             <button className="topbar-user" onClick={(event) => setProfileAnchor(event.currentTarget)}>
-              <Avatar className="topbar-avatar">AJ</Avatar>
-              <span><strong>Alex Johnson</strong><small>{role}</small></span>
+              <Avatar className="topbar-avatar">{user?.name?.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</Avatar>
+              <span><strong>{user?.name}</strong><small>{role}</small></span>
               <ChevronDown size={15} />
             </button>
           </div>
@@ -276,7 +298,7 @@ export default function AppLayout({
               <span><strong>{item.title}</strong><small>{item.text}</small><em>{item.time}</em></span>
             </button>
           ))}
-          <button className="notification-footer" onClick={() => { setNotificationAnchor(null); onNotify("All notifications opened"); }}>View all notifications</button>
+          <button className="notification-footer" onClick={() => { setNotificationAnchor(null); navigate("/alerts"); }}>View all notifications</button>
         </div>
       </Popover>
       <Menu
@@ -286,9 +308,8 @@ export default function AppLayout({
         anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
         transformOrigin={{ vertical: "top", horizontal: "right" }}
       >
-        <MenuItem onClick={() => { setProfileAnchor(null); onNotify("Profile settings are coming in a later phase"); }}>My profile</MenuItem>
-        <MenuItem onClick={() => { setProfileAnchor(null); onNotify("Account settings opened"); }}>Account settings</MenuItem>
-        <MenuItem onClick={() => { setProfileAnchor(null); onNotify("This is a demo; no session was ended"); }}>Sign out</MenuItem>
+        <MenuItem onClick={() => { setProfileAnchor(null); navigate("/profile"); }}>My profile</MenuItem>
+        <MenuItem onClick={() => { setProfileAnchor(null); onLogout(); }}>Sign out</MenuItem>
       </Menu>
     </Box>
   );

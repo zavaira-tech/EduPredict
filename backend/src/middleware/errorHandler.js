@@ -1,8 +1,7 @@
 export function notFoundHandler(req, res) {
   res.status(404).json({
-    error: {
-      message: `Route not found: ${req.method} ${req.originalUrl}`,
-    },
+    success: false,
+    message: "Route not found.",
   });
 }
 
@@ -12,10 +11,21 @@ export function errorHandler(error, req, res, next) {
     return;
   }
 
-  console.error(error);
-  res.status(error.status || 500).json({
-    error: {
-      message: error.status ? error.message : "Internal server error",
-    },
-  });
+  const status = error.status || (error.name === "ValidationError" ? 400 : 500);
+  if (error.code === 11000) {
+    return res.status(409).json({ success: false, message: "A record with that unique value already exists." });
+  }
+  if (error.name === "CastError") {
+    return res.status(400).json({ success: false, message: "Invalid value for this record." });
+  }
+  if (status >= 500) console.error(error);
+  const message =
+    status >= 500
+      ? "Internal server error."
+      : error.name === "ValidationError"
+        ? "Validation failed."
+        : error instanceof SyntaxError && status === 400
+          ? "Invalid JSON request body."
+          : error.message;
+  res.status(status).json({ success: false, message });
 }

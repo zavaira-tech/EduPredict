@@ -6,10 +6,12 @@ import { fileURLToPath } from "node:url";
 import mongoose, { connectToDatabase } from "./config/db.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import healthRouter from "./routes/health.js";
+import authRouter from "./routes/authRoutes.js";
+import apiRouter from "./routes/apiRoutes.js";
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
 
-const { CORS_ORIGIN } = process.env;
+const clientUrl = process.env.CLIENT_URL || process.env.CORS_ORIGIN || "http://localhost:5173";
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
 const port = Number(process.env.PORT || 5000);
 
@@ -17,23 +19,31 @@ if (!mongoUri) {
   throw new Error("MONGODB_URI is required. Create backend/.env from .env.example.");
 }
 
-if (mongoUri.includes("<URL_ENCODED_PASSWORD>")) {
+if (mongoUri.includes("<URL_ENCODED_PASSWORD>") || mongoUri.includes("<DB_PASSWORD>")) {
   throw new Error(
     "Replace the password placeholder in backend/.env with your URL-encoded database password.",
   );
 }
+if (
+  !process.env.JWT_SECRET ||
+  process.env.JWT_SECRET.length < 32 ||
+  process.env.JWT_SECRET.startsWith("replace_with_") ||
+  process.env.JWT_SECRET === "your_secure_jwt_secret"
+) {
+  throw new Error("JWT_SECRET must contain at least 32 random characters in backend/.env.");
+}
+process.env.JWT_EXPIRES_IN ||= "7d";
 
 if (!Number.isInteger(port) || port < 1 || port > 65535) {
   throw new Error("PORT must be an integer between 1 and 65535.");
 }
 
 const app = express();
-
-if (CORS_ORIGIN) {
-  app.use(cors({ origin: CORS_ORIGIN }));
-}
+app.use(cors({ origin: clientUrl.split(",").map((origin) => origin.trim()) }));
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/health", healthRouter);
+app.use("/api/auth", authRouter);
+app.use("/api", apiRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
