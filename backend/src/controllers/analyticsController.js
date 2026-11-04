@@ -154,6 +154,7 @@ function enrollmentMatch(scope, filters) {
     ...matchByIds("course", scope.courseIds),
     ...(filters.semester ? { semester: filters.semester } : {}),
     ...(filters.academicYear ? { academicYear: filters.academicYear } : {}),
+    ...(filters.date ? { enrolledAt: filters.date } : {}),
   };
 }
 
@@ -682,6 +683,8 @@ export const getCourseAnalytics = asyncHandler(async (req, res) => {
                   ...personalStudentFilter,
                   ...(filters.academicYear ? [{ $eq: ["$academicYear", filters.academicYear] }] : []),
                   ...(filters.semester ? [{ $eq: ["$semester", filters.semester] }] : []),
+                  ...(filters.date?.$gte ? [{ $gte: ["$enrolledAt", filters.date.$gte] }] : []),
+                  ...(filters.date?.$lte ? [{ $lte: ["$enrolledAt", filters.date.$lte] }] : []),
                 ],
               },
             },
