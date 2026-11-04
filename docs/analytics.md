@@ -14,8 +14,8 @@ Analytics routes accept these optional query parameters:
 | Parameter | Meaning |
 | --- | --- |
 | `from`, `to` | Inclusive date bounds; applied to performance `createdAt` and attendance `date` |
-| `academicYear` | Matches enrollment records for the selected year |
-| `semester` | Matches semester performance and enrollment records; attendance is scoped through enrollment |
+| `academicYear` | Matches academic-period metadata on performance/attendance records and enrollment records |
+| `semester` | Matches semester performance, attendance, and enrollment records |
 | `department` | Student/course department |
 | `course`, `student` | MongoDB document IDs; access is checked against the caller's role |
 | `page`, `limit` | Student and anomaly pagination; limit is 1–100 |
@@ -26,7 +26,11 @@ records. A passing performance record has `totalScore >= 50`; fail percentage
 uses the corresponding records with scores below 50. Empty datasets return
 `null` for undefined percentages and averages. Student summary fields are used
 only as an all-time fallback when no relevant raw records or period filters are
-available.
+available. New attendance and performance entries inherit the latest matching
+enrollment's academic year and semester when those values are omitted. Records
+created before these fields existed cannot be assigned reliably to a historic
+academic year; year-filtered results intentionally exclude such records rather
+than guessing.
 
 ## API routes
 
@@ -79,6 +83,10 @@ dialog; no server-generated PDF dependency is introduced.
 Anomaly records have a per-day event key to avoid duplicate active records when
 detection runs repeatedly. Resolved or dismissed events are not reopened by
 same-day reruns. New events on a later day can be recorded again.
+
+Attendance APIs also return daily, weekly, and monthly distributions. Semester
+attendance history is reported only where attendance records carry a semester;
+the system does not infer a past semester from a student's current semester.
 
 ## Optional Python service
 
