@@ -7,8 +7,13 @@ const attendanceSchema = new mongoose.Schema(
     date: { type: Date, required: true, default: Date.now },
     status: { type: String, enum: ["Present", "Absent", "Late"], required: true },
     percentage: { type: Number, min: 0, max: 100 },
+    academicYear: { type: String, trim: true, maxlength: 20 },
+    semester: { type: Number, min: 1 },
   },
   { timestamps: true },
 );
+
+attendanceSchema.index({ student: 1, course: 1, date: -1 });
+attendanceSchema.index({ course: 1, academicYear: 1, semester: 1 });
 
 export default mongoose.model("Attendance", attendanceSchema);

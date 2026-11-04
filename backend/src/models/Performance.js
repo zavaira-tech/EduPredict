@@ -12,8 +12,12 @@ const performanceSchema = new mongoose.Schema(
     grade: { type: String, trim: true },
     gpa: { type: Number, min: 0, max: 4 },
     semester: { type: Number, min: 1 },
+    academicYear: { type: String, trim: true, maxlength: 20 },
   },
   { timestamps: true },
 );
+
+performanceSchema.index({ student: 1, course: 1, semester: 1, createdAt: -1 });
+performanceSchema.index({ course: 1, academicYear: 1, semester: 1 });
 
 export default mongoose.model("Performance", performanceSchema);

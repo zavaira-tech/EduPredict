@@ -8,7 +8,23 @@ import {
   updateEntity,
 } from "../controllers/entityController.js";
 import { getSummary } from "../controllers/dashboardController.js";
-import { getAnalyticsOverview } from "../controllers/analyticsController.js";
+import {
+  detectAnalyticsAnomalies,
+  exportAnalyticsCsv,
+  getAnalyticsAnomaly,
+  getAnalyticsOverview,
+  getAnalyticsTrends,
+  getAtRiskStudents,
+  getAttendanceAnalytics,
+  getCorrelationAnalytics,
+  getCourseAnalytics,
+  getDepartmentAnalytics,
+  getPerformanceAnalytics,
+  getSemesterAnalytics,
+  getStudentAnalytics,
+  listAnalyticsAnomalies,
+  updateAnalyticsAnomalyStatus,
+} from "../controllers/analyticsController.js";
 import {
   createEnrollment,
   deleteEnrollment,
@@ -24,7 +40,22 @@ import { authorizeRoles as allowRoles } from "../middleware/roleMiddleware.js";
 const router = Router();
 router.use(authenticate);
 router.get("/dashboard/summary", allowRoles("admin", "analyst", "teacher", "student"), getSummary);
-router.get("/analytics/overview", allowRoles("admin", "analyst"), getAnalyticsOverview);
+const analyticsReaders = ["admin", "analyst", "teacher", "student"];
+router.get("/analytics/overview", allowRoles(...analyticsReaders), getAnalyticsOverview);
+router.get("/analytics/students", allowRoles(...analyticsReaders), getStudentAnalytics);
+router.get("/analytics/performance", allowRoles(...analyticsReaders), getPerformanceAnalytics);
+router.get("/analytics/attendance", allowRoles(...analyticsReaders), getAttendanceAnalytics);
+router.get("/analytics/courses", allowRoles(...analyticsReaders), getCourseAnalytics);
+router.get("/analytics/departments", allowRoles(...analyticsReaders), getDepartmentAnalytics);
+router.get("/analytics/semesters", allowRoles(...analyticsReaders), getSemesterAnalytics);
+router.get("/analytics/correlations", allowRoles(...analyticsReaders), getCorrelationAnalytics);
+router.get("/analytics/trends", allowRoles(...analyticsReaders), getAnalyticsTrends);
+router.get("/analytics/at-risk-students", allowRoles(...analyticsReaders), getAtRiskStudents);
+router.get("/analytics/export/:type", allowRoles(...analyticsReaders), exportAnalyticsCsv);
+router.get("/analytics/anomalies", allowRoles("admin", "analyst"), listAnalyticsAnomalies);
+router.get("/analytics/anomalies/:id", allowRoles("admin", "analyst"), getAnalyticsAnomaly);
+router.post("/analytics/anomalies/detect", allowRoles("admin", "analyst"), detectAnalyticsAnomalies);
+router.put("/analytics/anomalies/:id/status", allowRoles("admin", "analyst"), updateAnalyticsAnomalyStatus);
 
 const defineResource = (path, model, { read, create, update = create, remove, detail = true }) => {
   const route = Router();

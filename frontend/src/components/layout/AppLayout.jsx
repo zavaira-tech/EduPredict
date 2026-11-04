@@ -61,7 +61,7 @@ const navigation = [
     items: [
       { title: "Predictions", path: "/predictions", icon: BarChart3, badge: "NEW" },
       { title: "Anomaly detection", path: "/anomalies", icon: ShieldAlert, roles: ["admin", "analyst"] },
-      { title: "Analytics & reports", path: "/analytics", icon: FileChartColumn, roles: ["admin", "analyst"] },
+      { title: "Analytics & reports", path: "/analytics", icon: FileChartColumn, roles: ["admin", "analyst", "teacher", "student"] },
       { title: "Datasets", path: "/datasets", icon: Database, roles: ["admin", "analyst"] },
     ],
   },

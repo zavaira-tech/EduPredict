@@ -19,6 +19,7 @@ import api from "./services/api.js";
 
 const LiveDashboard = lazy(() => import("./components/dashboard/LiveDashboard.jsx"));
 const AnalyticsDashboard = lazy(() => import("./components/dashboard/AnalyticsDashboard.jsx"));
+const AnomalyDashboard = lazy(() => import("./components/dashboard/AnomalyDashboard.jsx"));
 
 const resourceRoutes = [
   "users", "students", "teachers", "courses", "enrollments", "attendance", "performance",
@@ -167,11 +168,11 @@ function AppContent({ darkMode, onToggleTheme }) {
                 : <AccessDenied />}
             />
           ))}
-          <Route path="/analytics" element={["admin", "analyst"].includes(user.role)
-            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AnalyticsDashboard /></Suspense>
+          <Route path="/analytics" element={["admin", "analyst", "teacher", "student"].includes(user.role)
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AnalyticsDashboard user={user} /></Suspense>
             : <AccessDenied />} />
           <Route path="/anomalies" element={["admin", "analyst"].includes(user.role)
-            ? <ResourcePage resource="alerts" role={user.role} search={search} onNotify={showToast} />
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AnomalyDashboard /></Suspense>
             : <AccessDenied />} />
           <Route path="/profile" element={<AccountPage user={user} onUserUpdated={setUser} onNotify={showToast} />} />
           <Route path="/settings" element={user.role === "admin"

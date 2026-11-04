@@ -291,6 +291,21 @@ button { cursor: pointer; }
 .analytics-panel { min-width: 0; padding: 18px; border: 1px solid var(--line); background: var(--paper); }
 .analytics-panel:last-child { grid-column: 1 / -1; }
 .analytics-chart { width: 100%; height: 280px; margin-top: 15px; }
+.analytics-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px; margin: 16px 0; border: 1px solid var(--line); background: var(--paper); }
+.analytics-filters .MuiTextField-root { min-width: 130px; flex: 1; }
+.analytics-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin: 16px 0; }
+.analytics-metric { padding: 15px; }
+.analytics-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.analytics-table-wrap { width: 100%; overflow-x: auto; margin-top: 12px; }
+.analytics-subtext { display: block; color: var(--muted); font-size: 10px; }
+.dashboard-page > .analytics-panel { margin-top: 18px; }
+
+@media print {
+  .desktop-sidebar, .mobile-menu-button, .topbar, .analytics-filters, .analytics-actions,
+  .MuiSnackbar-root, .MuiDialog-root { display: none !important; }
+  .main-content { width: 100% !important; padding: 0 !important; }
+  .analytics-panel, .kpi-card { break-inside: avoid; box-shadow: none !important; }
+}
 
 @media (max-width: 1320px) {
   .desktop-sidebar { width: 235px; min-width: 235px; }
@@ -312,6 +327,7 @@ button { cursor: pointer; }
   .account-grid { grid-template-columns: 1fr; }
   .analytics-grid { grid-template-columns: 1fr; }
   .analytics-panel:last-child { grid-column: auto; }
+  .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .topbar { height: 65px; padding: 0 13px; }
   .topbar-breadcrumb { display: none; }
   .topbar-title { font-size: 14px !important; }
