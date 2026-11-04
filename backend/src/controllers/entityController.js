@@ -75,6 +75,20 @@ function isValidId(id) {
 }
 
 async function validateEntityReferences(modelName, fields, recordId) {
+  if (["attendance", "performance"].includes(modelName)) {
+    if (
+      fields.academicYear !== undefined &&
+      (typeof fields.academicYear !== "string" || fields.academicYear.trim().length > 20)
+    ) {
+      return "Academic year must be a string of at most 20 characters.";
+    }
+    if (
+      fields.semester !== undefined &&
+      (!Number.isInteger(Number(fields.semester)) || Number(fields.semester) < 1)
+    ) {
+      return "Semester must be a positive whole number.";
+    }
+  }
   if (["students", "teachers"].includes(modelName) && fields.user) {
     if (!isValidId(fields.user)) return "A valid user account ID is required.";
     const expectedRole = modelName === "students" ? "student" : "teacher";
@@ -104,6 +118,28 @@ async function validateEntityReferences(modelName, fields, recordId) {
     if (!student || !course) return "The selected student or course record does not exist.";
   }
   return null;
+}
+
+async function inferAcademicPeriod(modelName, fields) {
+  if (!["attendance", "performance"].includes(modelName)) return;
+  if (fields.academicYear && fields.semester) return;
+  const enrollmentQuery = {
+    student: fields.student,
+    course: fields.course,
+    ...(fields.academicYear ? { academicYear: fields.academicYear.trim() } : {}),
+    ...(fields.semester ? { semester: Number(fields.semester) } : {}),
+  };
+  let enrollment = await Enrollment.findOne({ ...enrollmentQuery, status: "active" })
+    .sort({ enrolledAt: -1 })
+    .select("academicYear semester");
+  if (!enrollment) {
+    enrollment = await Enrollment.findOne(enrollmentQuery)
+      .sort({ enrolledAt: -1 })
+      .select("academicYear semester");
+  }
+  if (!enrollment) return;
+  if (!fields.academicYear) fields.academicYear = enrollment.academicYear;
+  if (!fields.semester) fields.semester = enrollment.semester;
 }
 
 export function listEntities(modelName) {
@@ -162,6 +198,7 @@ export function createEntity(modelName) {
     }
     if (modelName === "datasets") body.uploadedBy = req.user._id;
     if (modelName === "courses") delete body.enrolledStudents;
+    await inferAcademicPeriod(modelName, body);
     if (modelName === "support") {
       body.user = req.user._id;
       body.status = "open";
@@ -200,6 +237,11 @@ export function updateEntity(modelName) {
     );
     if (referenceError) {
       return res.status(400).json({ success: false, message: referenceError });
+    }
+    const updatedPeriod = { ...record.toObject(), ...changes };
+    await inferAcademicPeriod(modelName, updatedPeriod);
+    for (const key of ["academicYear", "semester"]) {
+      if (updatedPeriod[key] !== record[key]) changes[key] = updatedPeriod[key];
     }
     Object.assign(record, changes);
     await record.save();
