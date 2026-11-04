@@ -277,15 +277,29 @@ export default function AnalyticsDashboard({ user }) {
         </ChartPanel>
         <ChartPanel title="Semester performance">
           {analytics.semesters.length ? (
-            <div className="analytics-chart"><ResponsiveContainer width="100%" height="100%">
-              <LineChart data={analytics.semesters}>
-                <CartesianGrid vertical={false} stroke="#edf0f5" />
-                <XAxis dataKey="semester" tickFormatter={(value) => `S${value}`} axisLine={false} tickLine={false} />
-                <YAxis domain={[0, 4]} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Line dataKey="averageGpa" name="Average GPA" stroke="#8d74d8" connectNulls />
-              </LineChart>
-            </ResponsiveContainer></div>
+            <>
+              <div className="analytics-chart"><ResponsiveContainer width="100%" height="100%">
+                <LineChart data={analytics.semesters}>
+                  <CartesianGrid vertical={false} stroke="#edf0f5" />
+                  <XAxis dataKey="semester" tickFormatter={(value) => `S${value}`} axisLine={false} tickLine={false} />
+                  <YAxis domain={[0, 4]} axisLine={false} tickLine={false} />
+                  <Tooltip />
+                  <Line dataKey="averageGpa" name="Average GPA" stroke="#8d74d8" connectNulls />
+                </LineChart>
+              </ResponsiveContainer></div>
+              <div className="analytics-table-wrap">
+                <Table size="small">
+                  <TableHead><TableRow><TableCell>Semester</TableCell><TableCell>Enrollment</TableCell><TableCell>Attendance</TableCell><TableCell>Pass rate</TableCell><TableCell>Fail rate</TableCell></TableRow></TableHead>
+                  <TableBody>{analytics.semesters.map((item) => (
+                    <TableRow key={item.semester}>
+                      <TableCell>{item.semester}</TableCell><TableCell>{item.enrollment}</TableCell>
+                      <TableCell>{formatPercent(item.averageAttendance)}</TableCell>
+                      <TableCell>{formatPercent(item.passPercentage)}</TableCell><TableCell>{formatPercent(item.failPercentage)}</TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </Table>
+              </div>
+            </>
           ) : <div className="resource-empty"><h2>No semester records</h2><p>Semester trends require saved performance records.</p></div>}
         </ChartPanel>
         <ChartPanel title="Course performance">
@@ -303,15 +317,29 @@ export default function AnalyticsDashboard({ user }) {
         </ChartPanel>
         <ChartPanel title="Department comparison">
           {analytics.departments.length ? (
-            <div className="analytics-chart"><ResponsiveContainer width="100%" height="100%">
-              <BarChart data={analytics.departments}>
-                <CartesianGrid vertical={false} stroke="#edf0f5" />
-                <XAxis dataKey="department" axisLine={false} tickLine={false} />
-                <YAxis yAxisId="gpa" domain={[0, 4]} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Bar yAxisId="gpa" dataKey="averageGpa" name="Average GPA" fill="#8d74d8" radius={[5, 5, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer></div>
+            <>
+              <div className="analytics-chart"><ResponsiveContainer width="100%" height="100%">
+                <BarChart data={analytics.departments}>
+                  <CartesianGrid vertical={false} stroke="#edf0f5" />
+                  <XAxis dataKey="department" axisLine={false} tickLine={false} />
+                  <YAxis yAxisId="gpa" domain={[0, 4]} axisLine={false} tickLine={false} />
+                  <Tooltip />
+                  <Bar yAxisId="gpa" dataKey="averageGpa" name="Average GPA" fill="#8d74d8" radius={[5, 5, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer></div>
+              <div className="analytics-table-wrap">
+                <Table size="small">
+                  <TableHead><TableRow><TableCell>Department</TableCell><TableCell>Students</TableCell><TableCell>Attendance</TableCell><TableCell>Pass rate</TableCell><TableCell>Fail rate</TableCell></TableRow></TableHead>
+                  <TableBody>{analytics.departments.map((item) => (
+                    <TableRow key={item.department}>
+                      <TableCell>{item.department}</TableCell><TableCell>{item.students}</TableCell>
+                      <TableCell>{formatPercent(item.averageAttendance)}</TableCell>
+                      <TableCell>{formatPercent(item.passPercentage)}</TableCell><TableCell>{formatPercent(item.failPercentage)}</TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </Table>
+              </div>
+            </>
           ) : <div className="resource-empty"><h2>No department records</h2><p>Department comparisons appear when academic records are available.</p></div>}
         </ChartPanel>
         <ChartPanel title="Attendance by course">
@@ -342,15 +370,30 @@ export default function AnalyticsDashboard({ user }) {
         </ChartPanel>
         <ChartPanel title="Course enrollment">
           {analytics.courses.length ? (
-            <div className="analytics-chart"><ResponsiveContainer width="100%" height="100%">
-              <BarChart data={analytics.courses}>
-                <CartesianGrid vertical={false} stroke="#edf0f5" />
-                <XAxis dataKey="courseCode" axisLine={false} tickLine={false} />
-                <YAxis allowDecimals={false} axisLine={false} tickLine={false} />
-                <Tooltip />
-                <Bar dataKey="enrollments" name="Enrollments" fill="#8d74d8" radius={[5, 5, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer></div>
+            <>
+              <div className="analytics-chart"><ResponsiveContainer width="100%" height="100%">
+                <BarChart data={analytics.courses}>
+                  <CartesianGrid vertical={false} stroke="#edf0f5" />
+                  <XAxis dataKey="courseCode" axisLine={false} tickLine={false} />
+                  <YAxis allowDecimals={false} axisLine={false} tickLine={false} />
+                  <Tooltip />
+                  <Bar dataKey="enrollments" name="Enrollments" fill="#8d74d8" radius={[5, 5, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer></div>
+              <div className="analytics-table-wrap">
+                <Table size="small">
+                  <TableHead><TableRow><TableCell>Course</TableCell><TableCell>Enrolled</TableCell><TableCell>Completed</TableCell><TableCell>Completion</TableCell><TableCell>Avg GPA</TableCell><TableCell>Attendance</TableCell><TableCell>Fail rate</TableCell></TableRow></TableHead>
+                  <TableBody>{analytics.courses.map((item) => (
+                    <TableRow key={item.courseId}>
+                      <TableCell>{item.courseCode}</TableCell><TableCell>{item.enrollments}</TableCell>
+                      <TableCell>{item.completions}</TableCell><TableCell>{formatPercent(item.completionRate)}</TableCell>
+                      <TableCell>{Number.isFinite(item.averageGpa) ? item.averageGpa.toFixed(2) : "—"}</TableCell>
+                      <TableCell>{formatPercent(item.averageAttendance)}</TableCell><TableCell>{formatPercent(item.failPercentage)}</TableCell>
+                    </TableRow>
+                  ))}</TableBody>
+                </Table>
+              </div>
+            </>
           ) : <div className="resource-empty"><h2>No enrollment records</h2><p>Course popularity is based on saved enrollment records.</p></div>}
         </ChartPanel>
         <ChartPanel title="Attendance and GPA correlation">

@@ -21,11 +21,14 @@ function parseFilters(query) {
   const filters = {};
   for (const key of ["course", "student"]) {
     if (query[key] !== undefined) {
-      if (!objectIdPattern.test(query[key])) throw httpError(400, `Invalid ${key} ID.`);
+      if (typeof query[key] !== "string" || !objectIdPattern.test(query[key])) {
+        throw httpError(400, `Invalid ${key} ID.`);
+      }
       filters[key] = new mongoose.Types.ObjectId(query[key]);
     }
   }
   if (query.semester !== undefined) {
+    if (!["string", "number"].includes(typeof query.semester)) throw httpError(400, "Invalid semester.");
     const semester = Number(query.semester);
     if (!Number.isInteger(semester) || semester < 1) throw httpError(400, "Invalid semester.");
     filters.semester = semester;
@@ -34,7 +37,8 @@ function parseFilters(query) {
     if (typeof query.academicYear !== "string" || query.academicYear.length > 20) {
       throw httpError(400, "Invalid academic year.");
     }
-    filters.academicYear = query.academicYear;
+    if (!query.academicYear.trim()) throw httpError(400, "Invalid academic year.");
+    filters.academicYear = query.academicYear.trim();
   }
   if (query.department !== undefined) {
     if (typeof query.department !== "string" || query.department.trim().length > 100) {
@@ -44,8 +48,12 @@ function parseFilters(query) {
   }
   for (const [key, boundary] of [["from", "$gte"], ["to", "$lte"]]) {
     if (query[key] !== undefined) {
+      if (typeof query[key] !== "string") throw httpError(400, `Invalid ${key} date.`);
       const date = new Date(query[key]);
       if (Number.isNaN(date.getTime())) throw httpError(400, `Invalid ${key} date.`);
+      if (key === "to" && /^\d{4}-\d{2}-\d{2}$/.test(query[key])) {
+        date.setUTCHours(23, 59, 59, 999);
+      }
       filters.date ??= {};
       filters.date[boundary] = date;
     }
@@ -103,24 +111,6 @@ async function getScope(user, filters) {
     if (!studentExists) throw httpError(400, "Student not found.");
     studentIds = [filters.student];
   }
-  if (filters.academicYear || filters.semester) {
-    const enrollmentFilters = {
-      ...matchByIds("student", studentIds),
-      ...matchByIds("course", courseIds),
-      ...(filters.academicYear ? { academicYear: filters.academicYear } : {}),
-      ...(filters.semester ? { semester: filters.semester } : {}),
-    };
-    const [enrolledStudents, enrolledCourses] = await Promise.all([
-      Enrollment.distinct("student", enrollmentFilters),
-      Enrollment.distinct("course", enrollmentFilters),
-    ]);
-    studentIds = studentIds === null
-      ? enrolledStudents
-      : studentIds.filter((id) => enrolledStudents.some((match) => match.equals(id)));
-    courseIds = courseIds === null
-      ? enrolledCourses
-      : courseIds.filter((id) => enrolledCourses.some((match) => match.equals(id)));
-  }
   return { studentIds, courseIds };
 }
 
@@ -166,12 +156,47 @@ function attendanceFilterStages(scope, filters, extraMatch = {}) {
   return [{ $match: { ...attendanceMatch(scope, filters), ...extraMatch } }];
 }
 
-function studentPipeline(scope, filters) {
-  const hasAcademicFilters = Boolean(filters.course || filters.semester || filters.date);
+function studentPopulationPipeline(scope, filters) {
   const studentMatch = {
     ...matchByIds("_id", scope.studentIds),
     ...(filters.department ? { department: filters.department } : {}),
   };
+  const pipeline = [{ $match: studentMatch }];
+  if (filters.academicYear || filters.semester) {
+    pipeline.push(
+      {
+        $lookup: {
+          from: Enrollment.collection.name,
+          let: { studentId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$student", "$$studentId"] },
+                    ...(scope.courseIds === null ? [] : [{ $in: ["$course", scope.courseIds] }]),
+                    ...(filters.academicYear ? [{ $eq: ["$academicYear", filters.academicYear] }] : []),
+                    ...(filters.semester ? [{ $eq: ["$semester", filters.semester] }] : []),
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+          ],
+          as: "matchingEnrollment",
+        },
+      },
+      { $match: { "matchingEnrollment.0": { $exists: true } } },
+    );
+  }
+  return pipeline;
+}
+
+function studentPipeline(scope, filters) {
+  const hasAcademicFilters = Boolean(
+    filters.course || filters.semester || filters.date || filters.academicYear,
+  );
+  const pipeline = studentPopulationPipeline(scope, filters);
   const perfExpr = [{ $eq: ["$student", "$$studentId"] }];
   const attendanceExpr = [{ $eq: ["$student", "$$studentId"] }];
   if (scope.courseIds !== null) {
@@ -193,7 +218,7 @@ function studentPipeline(scope, filters) {
     attendanceExpr.push({ $lte: ["$date", filters.date.$lte || new Date("9999-12-31")] });
   }
   return [
-    { $match: studentMatch },
+    ...pipeline,
     {
       $lookup: {
         from: Performance.collection.name,
@@ -372,11 +397,44 @@ function csvResponse(res, filename, headers, rows) {
 export const getAnalyticsOverview = asyncHandler(async (req, res) => {
   const filters = parseFilters(req.query);
   const scope = await getScope(req.user, filters);
-  const [students, performance, attendance, courses, riskResult] = await Promise.all([
-    Student.countDocuments({
-      ...matchByIds("_id", scope.studentIds),
-      ...(filters.department ? { department: filters.department } : {}),
-    }),
+  const courseScope = {
+    ...matchByIds("_id", scope.courseIds),
+    ...(filters.department ? { department: filters.department } : {}),
+  };
+  const courseCountQuery = filters.academicYear || filters.semester || filters.date
+    ? Course.aggregate([
+      { $match: courseScope },
+      {
+        $lookup: {
+          from: Enrollment.collection.name,
+          let: { courseId: "$_id" },
+          pipeline: [
+            {
+              $match: {
+                $expr: {
+                  $and: [
+                    { $eq: ["$course", "$$courseId"] },
+                    ...(req.user.role === "student"
+                      ? [{ $in: ["$student", scope.studentIds] }]
+                      : []),
+                    ...(filters.academicYear ? [{ $eq: ["$academicYear", filters.academicYear] }] : []),
+                    ...(filters.semester ? [{ $eq: ["$semester", filters.semester] }] : []),
+                    ...(filters.date?.$gte ? [{ $gte: ["$enrolledAt", filters.date.$gte] }] : []),
+                    ...(filters.date?.$lte ? [{ $lte: ["$enrolledAt", filters.date.$lte] }] : []),
+                  ],
+                },
+              },
+            },
+            { $limit: 1 },
+          ],
+          as: "matchingEnrollment",
+        },
+      },
+      { $match: { "matchingEnrollment.0": { $exists: true } } },
+      { $count: "count" },
+    ]).then((rows) => rows[0]?.count || 0)
+    : Course.countDocuments(courseScope);
+  const [performance, attendance, courses, riskResult] = await Promise.all([
     Performance.aggregate([
       ...performanceFilterStages(scope, filters),
       { $group: { _id: null, averageGpa: { $avg: "$gpa" }, averageScore: { $avg: "$totalScore" }, pass: { $sum: { $cond: [{ $gte: ["$totalScore", 50] }, 1, 0] } }, fail: { $sum: { $cond: [{ $lt: ["$totalScore", 50] }, 1, 0] } }, records: { $sum: 1 } } },
@@ -391,10 +449,7 @@ export const getAnalyticsOverview = asyncHandler(async (req, res) => {
         },
       },
     ]),
-    Course.countDocuments({
-      ...matchByIds("_id", scope.courseIds),
-      ...(filters.department ? { department: filters.department } : {}),
-    }),
+    courseCountQuery,
     Student.aggregate([
       ...studentPipeline(scope, filters),
       {
@@ -407,6 +462,7 @@ export const getAnalyticsOverview = asyncHandler(async (req, res) => {
           studentSummary: [
             { $group: { _id: null, averageGpa: { $avg: "$gpa" }, averageAttendance: { $avg: "$attendance" } } },
           ],
+          studentCount: [{ $count: "count" }],
         },
       },
     ]),
@@ -419,7 +475,7 @@ export const getAnalyticsOverview = asyncHandler(async (req, res) => {
   res.json({
     success: true,
     data: {
-      totalStudents: students,
+      totalStudents: riskResult[0]?.studentCount?.[0]?.count || 0,
       averageGpa: rounded(
         performanceStats.averageGpa ?? (hasPeriodFilter ? null : studentSummary.averageGpa),
         2,
@@ -554,6 +610,7 @@ export const getPerformanceAnalytics = asyncHandler(async (req, res) => {
 export const getAttendanceAnalytics = asyncHandler(async (req, res) => {
   const filters = parseFilters(req.query);
   const scope = await getScope(req.user, filters);
+  const { page, limit } = getPage(req.query);
   const [summary, daily, weekly, monthly, courseAttendance, departmentAttendance, students] = await Promise.all([
     Attendance.aggregate([
       ...attendanceFilterStages(scope, filters),
@@ -634,9 +691,17 @@ export const getAttendanceAnalytics = asyncHandler(async (req, res) => {
       ...studentPipeline(scope, filters),
       { $project: { recordId: 1, name: 1, department: 1, attendance: 1, attendanceRecords: 1, absentRecords: 1 } },
       { $sort: { attendance: 1 } },
+      {
+        $facet: {
+          students: [{ $skip: (page - 1) * limit }, { $limit: limit }],
+          metadata: [{ $count: "total" }],
+        },
+      },
     ]),
   ]);
   const stats = summary[0] || {};
+  const attendanceStudents = students[0] || { students: [], metadata: [] };
+  const attendanceStudentTotal = attendanceStudents.metadata[0]?.total || 0;
   res.json({
     success: true,
     data: {
@@ -650,10 +715,16 @@ export const getAttendanceAnalytics = asyncHandler(async (req, res) => {
       monthly,
       courseAttendance,
       departmentAttendance,
-      students: students.map((student) => ({
+      students: attendanceStudents.students.map((student) => ({
         ...student,
         atRisk: Number.isFinite(student.attendance) && student.attendance < 75,
       })),
+      pagination: {
+        page,
+        limit,
+        total: attendanceStudentTotal,
+        pages: Math.ceil(attendanceStudentTotal / limit),
+      },
     },
   });
 });
@@ -694,6 +765,11 @@ export const getCourseAnalytics = asyncHandler(async (req, res) => {
         as: "enrollmentStats",
       },
     },
+    ...(
+      filters.academicYear || filters.semester || filters.date
+        ? [{ $match: { "enrollmentStats.0": { $exists: true } } }]
+        : []
+    ),
     {
       $lookup: {
         from: Performance.collection.name,
@@ -794,7 +870,7 @@ export const getDepartmentAnalytics = asyncHandler(async (req, res) => {
   const scope = await getScope(req.user, filters);
   const [studentStats, performanceStats, attendanceStats] = await Promise.all([
     Student.aggregate([
-      { $match: { ...matchByIds("_id", scope.studentIds), ...(filters.department ? { department: filters.department } : {}) } },
+      ...studentPopulationPipeline(scope, filters),
       { $group: { _id: "$department", students: { $sum: 1 }, storedGpa: { $avg: "$gpa" }, storedAttendance: { $avg: "$attendancePercentage" } } },
     ]),
     Performance.aggregate([
@@ -868,7 +944,13 @@ export const getSemesterAnalytics = asyncHandler(async (req, res) => {
     Attendance.aggregate([
       ...attendanceFilterStages(scope, filters),
       { $match: { semester: { $type: "number" } } },
-      { $group: { _id: "$semester", records: { $sum: 1 }, present: { $sum: { $cond: [{ $in: ["$status", ["Present", "Late"]] }, 1, 0] } } },
+      {
+        $group: {
+          _id: "$semester",
+          records: { $sum: 1 },
+          present: { $sum: { $cond: [{ $in: ["$status", ["Present", "Late"]] }, 1, 0] } },
+        },
+      },
     ]),
   ]);
   const enrollmentBySemester = new Map(enrollments.map((entry) => [entry._id, entry.enrollment]));
@@ -1018,9 +1100,9 @@ function severityFor(value, lowerFence, mean, standardDeviation) {
 }
 
 export const detectAnalyticsAnomalies = asyncHandler(async (req, res) => {
-  const filters = parseFilters(req.query || {});
+  const filters = parseFilters({ ...(req.body || {}), ...(req.query || {}) });
   const scope = await getScope(req.user, filters);
-  const [students, courses, courseFailures] = await Promise.all([
+  const [students, courses, courseFailures, invalidPerformance, invalidAttendance, orphanPerformance, orphanAttendance, orphanEnrollment] = await Promise.all([
     Student.aggregate([
       ...studentPipeline(scope, filters),
       { $project: { studentId: 1, name: 1, attendance: 1, gpa: 1, averageScore: 1, attendanceRecords: 1, absentRecords: 1, performanceRecords: 1, recentScores: 1 } },
@@ -1042,6 +1124,50 @@ export const detectAnalyticsAnomalies = asyncHandler(async (req, res) => {
       },
       { $project: { _id: 1, records: 1, failPercentage: { $multiply: [{ $divide: ["$failed", "$records"] }, 100] } } },
     ]),
+    Performance.aggregate([
+      { $match: { ...performanceMatch(scope, filters), $or: [
+        { assignmentScore: { $lt: 0 } }, { assignmentScore: { $gt: 100 } },
+        { quizScore: { $lt: 0 } }, { quizScore: { $gt: 100 } },
+        { midtermScore: { $lt: 0 } }, { midtermScore: { $gt: 100 } },
+        { finalScore: { $lt: 0 } }, { finalScore: { $gt: 100 } },
+        { totalScore: { $lt: 0 } }, { totalScore: { $gt: 100 } },
+        { gpa: { $lt: 0 } }, { gpa: { $gt: 4 } },
+      ] } },
+      { $limit: 5001 },
+      { $project: { student: 1, course: 1, assignmentScore: 1, quizScore: 1, midtermScore: 1, finalScore: 1, totalScore: 1, gpa: 1 } },
+    ]),
+    Attendance.aggregate([
+      { $match: { ...attendanceMatch(scope, filters), $or: [
+        { percentage: { $lt: 0 } }, { percentage: { $gt: 100 } },
+        { status: { $nin: ["Present", "Absent", "Late"] } },
+      ] } },
+      { $limit: 5001 },
+      { $project: { student: 1, course: 1, status: 1, percentage: 1 } },
+    ]),
+    Performance.aggregate([
+      { $match: performanceMatch(scope, filters) },
+      { $lookup: { from: Student.collection.name, localField: "student", foreignField: "_id", as: "studentRecord" } },
+      { $lookup: { from: Course.collection.name, localField: "course", foreignField: "_id", as: "courseRecord" } },
+      { $match: { $expr: { $or: [{ $eq: [{ $size: "$studentRecord" }, 0] }, { $eq: [{ $size: "$courseRecord" }, 0] }] } } },
+      { $limit: 5001 },
+      { $project: { student: 1, course: 1, studentExists: { $gt: [{ $size: "$studentRecord" }, 0] }, courseExists: { $gt: [{ $size: "$courseRecord" }, 0] } } },
+    ]),
+    Attendance.aggregate([
+      { $match: attendanceMatch(scope, filters) },
+      { $lookup: { from: Student.collection.name, localField: "student", foreignField: "_id", as: "studentRecord" } },
+      { $lookup: { from: Course.collection.name, localField: "course", foreignField: "_id", as: "courseRecord" } },
+      { $match: { $expr: { $or: [{ $eq: [{ $size: "$studentRecord" }, 0] }, { $eq: [{ $size: "$courseRecord" }, 0] }] } } },
+      { $limit: 5001 },
+      { $project: { student: 1, course: 1, studentExists: { $gt: [{ $size: "$studentRecord" }, 0] }, courseExists: { $gt: [{ $size: "$courseRecord" }, 0] } } },
+    ]),
+    Enrollment.aggregate([
+      { $match: enrollmentMatch(scope, filters) },
+      { $lookup: { from: Student.collection.name, localField: "student", foreignField: "_id", as: "studentRecord" } },
+      { $lookup: { from: Course.collection.name, localField: "course", foreignField: "_id", as: "courseRecord" } },
+      { $match: { $expr: { $or: [{ $eq: [{ $size: "$studentRecord" }, 0] }, { $eq: [{ $size: "$courseRecord" }, 0] }] } } },
+      { $limit: 5001 },
+      { $project: { student: 1, course: 1, academicYear: 1, semester: 1, studentExists: { $gt: [{ $size: "$studentRecord" }, 0] }, courseExists: { $gt: [{ $size: "$courseRecord" }, 0] } } },
+    ]),
   ]);
 
   const attendanceValues = students.map((student) => student.attendance).filter(Number.isFinite).sort((a, b) => a - b);
@@ -1055,6 +1181,62 @@ export const detectAnalyticsAnomalies = asyncHandler(async (req, res) => {
   const attendanceLowerFence = attendanceQ1 === null
     ? null
     : attendanceQ1 - 1.5 * (attendanceQ3 - attendanceQ1);
+
+  for (const record of invalidPerformance.slice(0, 5000)) {
+    candidates.push({
+      anomalyType: "data-quality",
+      entityType: "performance",
+      entityId: record._id,
+      description: "A performance record contains a score outside 0–100 or GPA outside 0–4.",
+      severity: "High",
+      detectionMethod: "Schema-range validation (legacy/raw record check)",
+      measuredValue: {
+        assignmentScore: record.assignmentScore,
+        quizScore: record.quizScore,
+        midtermScore: record.midtermScore,
+        finalScore: record.finalScore,
+        totalScore: record.totalScore,
+        gpa: record.gpa,
+      },
+      expectedRange: { scores: { minimum: 0, maximum: 100 }, gpa: { minimum: 0, maximum: 4 } },
+      evidence: { student: record.student, course: record.course },
+      metric: "invalid-performance-value",
+    });
+  }
+  for (const record of invalidAttendance.slice(0, 5000)) {
+    candidates.push({
+      anomalyType: "data-quality",
+      entityType: "attendance",
+      entityId: record._id,
+      description: "An attendance record contains an unsupported status or percentage outside 0–100.",
+      severity: "Medium",
+      detectionMethod: "Schema-enum/range validation (legacy/raw record check)",
+      measuredValue: { status: record.status, percentage: record.percentage },
+      expectedRange: { statuses: ["Present", "Absent", "Late"], percentage: { minimum: 0, maximum: 100 } },
+      evidence: { student: record.student, course: record.course },
+      metric: "invalid-attendance-value",
+    });
+  }
+  for (const [entityType, records] of [
+    ["performance", orphanPerformance],
+    ["attendance", orphanAttendance],
+    ["enrollment", orphanEnrollment],
+  ]) {
+    for (const record of records.slice(0, 5000)) {
+      candidates.push({
+        anomalyType: "data-quality",
+        entityType,
+        entityId: record._id,
+        description: `A ${entityType} record references a missing student or course.`,
+        severity: "High",
+        detectionMethod: "Reference-integrity check",
+        measuredValue: { studentExists: record.studentExists, courseExists: record.courseExists },
+        expectedRange: { studentExists: true, courseExists: true },
+        evidence: { student: record.student, course: record.course },
+        metric: `inconsistent-${entityType}-reference`,
+      });
+    }
+  }
 
   for (const student of students) {
     if (!student.performanceRecords) {
@@ -1238,38 +1420,72 @@ export const detectAnalyticsAnomalies = asyncHandler(async (req, res) => {
       },
     })));
   }
-  res.json({ success: true, data: { candidates: candidates.length, savedOrAlreadyActive: activeCandidates.length, checkedAt: detectedAt } });
+  const truncatedDataQualityScan = [
+    invalidPerformance,
+    invalidAttendance,
+    orphanPerformance,
+    orphanAttendance,
+    orphanEnrollment,
+  ].some((records) => records.length > 5000);
+  res.json({
+    success: true,
+    data: {
+      candidates: candidates.length,
+      savedOrAlreadyActive: activeCandidates.length,
+      truncatedDataQualityScan,
+      checkedAt: detectedAt,
+    },
+  });
 });
 
-export const listAnalyticsAnomalies = asyncHandler(async (req, res) => {
-  const { page, limit } = getPage(req.query);
+function getAnomalyFilter(query) {
   const filter = {};
-  if (req.query.severity !== undefined) {
-    if (!["Low", "Medium", "High", "Critical"].includes(req.query.severity)) throw httpError(400, "Invalid severity.");
-    filter.severity = req.query.severity;
+  if (query.severity !== undefined) {
+    if (!["Low", "Medium", "High", "Critical"].includes(query.severity)) throw httpError(400, "Invalid severity.");
+    filter.severity = query.severity;
   }
-  if (req.query.status !== undefined) {
-    if (!["New", "Reviewed", "Resolved", "Dismissed"].includes(req.query.status)) throw httpError(400, "Invalid status.");
-    filter.status = req.query.status;
+  if (query.status !== undefined) {
+    if (!["New", "Reviewed", "Resolved", "Dismissed"].includes(query.status)) throw httpError(400, "Invalid status.");
+    filter.status = query.status;
   }
-  if (req.query.type !== undefined) {
-    if (!["attendance", "performance", "course", "data-quality"].includes(req.query.type)) throw httpError(400, "Invalid anomaly type.");
-    filter.anomalyType = req.query.type;
+  if (query.type !== undefined) {
+    if (!["attendance", "performance", "course", "data-quality"].includes(query.type)) throw httpError(400, "Invalid anomaly type.");
+    filter.anomalyType = query.type;
   }
-  if (req.query.from || req.query.to) {
+  if (query.from || query.to) {
     filter.detectedAt = {};
     for (const [key, boundary] of [["from", "$gte"], ["to", "$lte"]]) {
-      if (req.query[key]) {
-        const date = new Date(req.query[key]);
+      if (query[key]) {
+        if (typeof query[key] !== "string") throw httpError(400, `Invalid ${key} date.`);
+        const date = new Date(query[key]);
         if (Number.isNaN(date.getTime())) throw httpError(400, `Invalid ${key} date.`);
+        if (key === "to" && /^\d{4}-\d{2}-\d{2}$/.test(query[key])) {
+          date.setUTCHours(23, 59, 59, 999);
+        }
         filter.detectedAt[boundary] = date;
       }
     }
+    if (
+      filter.detectedAt.$gte &&
+      filter.detectedAt.$lte &&
+      filter.detectedAt.$gte > filter.detectedAt.$lte
+    ) {
+      throw httpError(400, "The start date must be before the end date.");
+    }
   }
-  if (typeof req.query.search === "string" && req.query.search.trim()) {
-    const escaped = req.query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    filter.$or = [{ description: { $regex: escaped, $options: "i" } }, { anomalyId: { $regex: escaped, $options: "i" } }];
+  if (typeof query.search === "string" && query.search.trim()) {
+    const escaped = query.search.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    filter.$or = [
+      { description: { $regex: escaped, $options: "i" } },
+      { anomalyId: { $regex: escaped, $options: "i" } },
+    ];
   }
+  return filter;
+}
+
+export const listAnalyticsAnomalies = asyncHandler(async (req, res) => {
+  const { page, limit } = getPage(req.query);
+  const filter = getAnomalyFilter(req.query);
   const [anomalies, total] = await Promise.all([
     Anomaly.find(filter).populate("reviewedBy", "name email").sort({ detectedAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
     Anomaly.countDocuments(filter),
@@ -1305,7 +1521,7 @@ export const exportAnalyticsCsv = asyncHandler(async (req, res) => {
     if (!["admin", "analyst"].includes(req.user.role)) {
       throw httpError(403, "You do not have permission to export anomaly records.");
     }
-    const rows = await Anomaly.find({}).sort({ detectedAt: -1 }).limit(10000).lean();
+    const rows = await Anomaly.find(getAnomalyFilter(req.query)).sort({ detectedAt: -1 }).limit(10000).lean();
     return csvResponse(res, "anomaly-report.csv",
       ["Anomaly ID", "Type", "Entity type", "Entity ID", "Severity", "Status", "Description", "Method", "Measured value", "Detected at"],
       rows.map((row) => [row.anomalyId, row.anomalyType, row.entityType, row.entityId, row.severity, row.status, row.description, row.detectionMethod, JSON.stringify(row.measuredValue), row.detectedAt?.toISOString()]),

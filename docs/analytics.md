@@ -76,9 +76,12 @@ dialog; no server-generated PDF dependency is introduced.
   there are at least four courses; a failure rate of at least 50% is flagged
   after four performance records.
 * **Data-quality anomalies:** students without scoped performance or attendance
-  records are reported as completeness flags. The current schema does not
-  identify class sessions, so duplicate attendance on the same day is not
-  assumed to be invalid.
+  records are reported as completeness flags. Legacy records with scores outside
+  0–100, GPA outside 0–4, unsupported attendance statuses, or references to
+  missing students/courses are also flagged. Each data-quality check is capped
+  at 5,000 records per run; the detection response indicates when a scan was
+  truncated. The current schema does not identify class sessions, so duplicate
+  attendance on the same day is not assumed to be invalid.
 
 Anomaly records have a per-day event key to avoid duplicate active records when
 detection runs repeatedly. Resolved or dismissed events are not reopened by

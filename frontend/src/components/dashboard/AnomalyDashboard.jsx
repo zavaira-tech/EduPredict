@@ -21,7 +21,7 @@ import {
 import api from "../../services/api.js";
 
 export default function AnomalyDashboard() {
-  const [filters, setFilters] = useState({ severity: "", status: "", type: "", search: "" });
+  const [filters, setFilters] = useState({ severity: "", status: "", type: "", search: "", from: "", to: "" });
   const [anomalies, setAnomalies] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 25, total: 0 });
   const [selected, setSelected] = useState(null);
@@ -74,7 +74,10 @@ export default function AnomalyDashboard() {
 
   const exportCsv = async () => {
     try {
-      const { data } = await api.get("/analytics/export/anomalies", { responseType: "blob" });
+      const { data } = await api.get("/analytics/export/anomalies", {
+        params: Object.fromEntries(Object.entries(filters).filter(([, value]) => value)),
+        responseType: "blob",
+      });
       const url = URL.createObjectURL(data);
       const link = document.createElement("a");
       link.href = url;
@@ -105,6 +108,8 @@ export default function AnomalyDashboard() {
       {message && <Alert severity="success" onClose={() => setMessage("")}>{message}</Alert>}
       <Paper className="analytics-filters" elevation={0}>
         <TextField label="Search" size="small" value={filters.search} onChange={(event) => { setFilters({ ...filters, search: event.target.value }); setPagination({ ...pagination, page: 1 }); }} />
+        <TextField label="From" type="date" size="small" value={filters.from} InputLabelProps={{ shrink: true }} onChange={(event) => { setFilters({ ...filters, from: event.target.value }); setPagination({ ...pagination, page: 1 }); }} />
+        <TextField label="To" type="date" size="small" value={filters.to} InputLabelProps={{ shrink: true }} onChange={(event) => { setFilters({ ...filters, to: event.target.value }); setPagination({ ...pagination, page: 1 }); }} />
         <TextField label="Severity" select size="small" value={filters.severity} onChange={(event) => { setFilters({ ...filters, severity: event.target.value }); setPagination({ ...pagination, page: 1 }); }}>
           <MenuItem value="">All severities</MenuItem>{["Low", "Medium", "High", "Critical"].map((item) => <MenuItem key={item} value={item}>{item}</MenuItem>)}
         </TextField>

@@ -52,7 +52,7 @@ async def health() -> dict[str, str]:
 
 
 @app.post("/analyze/correlation", dependencies=[Depends(require_api_key)])
-async def correlation(request: CorrelationRequest) -> dict[str, int | float | None]:
+async def correlation(request: CorrelationRequest) -> dict[str, int | float | str | None]:
     if len(request.x) != len(request.y):
         raise HTTPException(status_code=422, detail="The x and y arrays must have equal lengths.")
     validate_finite(request.x)

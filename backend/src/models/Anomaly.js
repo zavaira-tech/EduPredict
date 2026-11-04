@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 
 const anomalySchema = new mongoose.Schema(
   {
-    anomalyId: { type: String, required: true, unique: true, trim: true },
+    anomalyId: { type: String, required: true, trim: true, index: true },
     eventKey: { type: String, required: true, unique: true, trim: true },
     anomalyType: {
       type: String,
