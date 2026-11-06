@@ -13,7 +13,11 @@ export async function connectToDatabase(uri) {
 
   if (!connectionPromise) {
     connectionPromise = mongoose
-      .connect(uri, { serverSelectionTimeoutMS: 10000 })
+      .connect(uri, {
+        serverSelectionTimeoutMS: 10000,
+        dbName: process.env.MONGODB_DB || "edupredict",
+        authSource: process.env.MONGODB_AUTH_SOURCE || "admin",
+      })
       .catch((error) => {
         connectionPromise = undefined;
         throw error;
