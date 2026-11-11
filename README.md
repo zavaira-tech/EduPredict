@@ -29,7 +29,8 @@ engineering -> analytics/models -> HDFS results/reports -> API/dashboard`.
 Streaming follows `event -> Kafka -> Spark Structured Streaming ->
 prediction/anomaly -> API alert -> dashboard`. The current backend provides
 JWT authentication, role-scoped REST APIs, Mongoose models, and live database
-summary statistics. The separate `ml-service/` trains supervised models from
+summary statistics. Guest mode uses a short-lived stateless JWT and a separate
+demo-only read-only dashboard. The separate `ml-service/` trains supervised models from
 validated historical MongoDB records provided by the backend and stores
 versioned, evaluated artifacts. Streaming pipelines remain future work.
 
@@ -55,10 +56,10 @@ versioned, evaluated artifacts. Streaming pipelines remain future work.
 
 The backend is the authorization boundary: every protected API request will
 authenticate its JWT and enforce role and record-level permissions. Hiding a
-button in React is not access control. The four planned roles are Administrator
-(platform and users), Teacher (assigned classes and students), Student
-(personal academic data), and Analyst (approved datasets and aggregate
-analysis).
+button in React is not access control. The registered roles are Administrator (platform and users), Teacher (assigned
+classes and students), Student (personal academic data), and Analyst (approved
+datasets and aggregate analysis). Guest is a temporary, read-only preview role
+with no access to the data API.
 
 The modules fit into these layers:
 
@@ -90,7 +91,9 @@ returns a clear insufficient-data response rather than generating synthetic
 application results.
 
 See [docs/analytics.md](./docs/analytics.md) for analytics API documentation,
-formulas, role scopes, Python service setup, report exports, and tests.
+formulas, role scopes, Python service setup, report exports, and tests. See
+[docs/guest-mode.md](./docs/guest-mode.md) for guest session behavior,
+permissions, and verification.
 
 ```text
 EduPredict/
@@ -98,6 +101,7 @@ EduPredict/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── dashboard/LiveDashboard.jsx
+│   │   │   ├── dashboard/GuestDashboard.jsx
 │   │   │   ├── dashboard/PredictiveAnalyticsDashboard.jsx
 │   │   │   ├── layout/AppLayout.jsx
 │   │   │   └── ResourcePage.jsx
@@ -125,6 +129,7 @@ EduPredict/
 ├── analytics-service/          # Optional authenticated Python statistics API
 ├── ml-service/                 # Authenticated scikit-learn training/inference API
 ├── docs/analytics.md
+├── docs/guest-mode.md
 ├── ml/                         # Python cleaning, features, training, inference
 ├── bigdata/
 │   └── hadoop/
@@ -593,6 +598,7 @@ register/login require a bearer token.
 | Route | Methods |
 | --- | --- |
 | `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me` | POST, POST, POST, GET |
+| `/auth/guest`, `/auth/guest/logout` | POST, POST |
 | `/auth/profile`, `/auth/change-password` | PUT, PUT |
 | `/dashboard/summary` | GET |
 | `/analytics/overview` | GET (admin/analyst) |

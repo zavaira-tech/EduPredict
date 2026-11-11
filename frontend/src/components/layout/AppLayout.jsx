@@ -4,6 +4,7 @@ import {
   Badge,
   Box,
   Button,
+  Chip,
   Divider,
   Drawer,
   IconButton,
@@ -30,6 +31,7 @@ import {
   GraduationCap,
   LayoutDashboard,
   LogOut,
+  LogIn,
   Menu as MenuIcon,
   Moon,
   Search,
@@ -77,13 +79,22 @@ const navigation = [
   },
 ];
 
+const guestNavigation = [
+  {
+    label: "EXPLORE",
+    items: [{ title: "Guest dashboard", path: "/guest", icon: LayoutDashboard }],
+  },
+];
+
 const pageTitles = Object.fromEntries(
   navigation.flatMap((group) => group.items.map((item) => [item.path, item.title])),
 );
 pageTitles["/profile"] = "My profile";
+pageTitles["/guest"] = "Guest dashboard";
 
-function SidebarContent({ onNavigate, role, user, onLogout, onNotify }) {
+function SidebarContent({ onNavigate, role, user, onLogout, onUpgrade }) {
   const initials = user?.name?.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase() || "EP";
+  const visibleNavigation = role === "guest" ? guestNavigation : navigation;
   return (
     <div className="sidebar-inner">
       <NavLink to="/" className="brand-lockup" onClick={onNavigate}>
@@ -93,12 +104,12 @@ function SidebarContent({ onNavigate, role, user, onLogout, onNotify }) {
 
       <div className="workspace-switcher">
         <div className="workspace-avatar">NU</div>
-        <div className="workspace-copy"><strong>EduPredict</strong><span>Institution workspace</span></div>
-        <ChevronDown size={15} />
+        <div className="workspace-copy"><strong>EduPredict</strong><span>{role === "guest" ? "Public demo" : "Institution workspace"}</span></div>
+        {role !== "guest" && <ChevronDown size={15} />}
       </div>
 
       <nav className="sidebar-nav" aria-label="Main navigation">
-        {navigation.map((group) => {
+        {visibleNavigation.map((group) => {
           const visibleItems = group.items.filter((item) => !item.roles || item.roles.includes(role));
           if (!visibleItems.length) return null;
           return (
@@ -123,16 +134,18 @@ function SidebarContent({ onNavigate, role, user, onLogout, onNotify }) {
       </nav>
 
       <div className="sidebar-bottom">
-        <div className="help-card">
-          <div className="help-card-icon"><CircleHelp size={17} /></div>
-          <strong>Need a hand?</strong>
-          <span>Visit the support workspace for assistance.</span>
-          <Button size="small" onClick={() => window.location.assign("/support")}>Get help <span>→</span></Button>
-        </div>
-        <button className="profile-button" onClick={onLogout} aria-label="Sign out">
+        {role !== "guest" && (
+          <div className="help-card">
+            <div className="help-card-icon"><CircleHelp size={17} /></div>
+            <strong>Need a hand?</strong>
+            <span>Visit the support workspace for assistance.</span>
+            <Button size="small" onClick={() => window.location.assign("/support")}>Get help <span>→</span></Button>
+          </div>
+        )}
+        <button className="profile-button" onClick={role === "guest" ? onUpgrade : onLogout} aria-label={role === "guest" ? "Sign in or create an account" : "Sign out"}>
           <Avatar className="profile-avatar">{initials}</Avatar>
-          <span className="profile-copy"><strong>{user?.name}</strong><small>{role}</small></span>
-          <LogOut size={16} className="profile-logout" />
+          <span className="profile-copy"><strong>{role === "guest" ? "Guest session" : user?.name}</strong><small>{role === "guest" ? "Read only" : role}</small></span>
+          {role === "guest" ? <LogIn size={16} className="profile-logout" /> : <LogOut size={16} className="profile-logout" />}
         </button>
       </div>
     </div>
@@ -146,6 +159,7 @@ export default function AppLayout({
   role,
   user,
   onLogout,
+  onUpgrade,
   onNotify,
   search,
   onSearchChange,
@@ -161,7 +175,7 @@ export default function AppLayout({
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (role === "analyst") {
+    if (role === "analyst" || role === "guest") {
       setNotifications([]);
       return;
     }
@@ -217,13 +231,13 @@ export default function AppLayout({
       role={role}
       user={user}
       onLogout={onLogout}
-      onNotify={onNotify}
+      onUpgrade={onUpgrade}
       onNavigate={() => setMobileOpen(false)}
     />
   );
 
   return (
-    <Box className={`app-shell${darkMode ? " dark-shell" : ""}`}>
+    <Box className={`app-shell${darkMode ? " dark-shell" : ""}${role === "guest" ? " guest-shell" : ""}`}>
       {!isMobile && <aside className="desktop-sidebar">{sidebar}</aside>}
       <Drawer
         open={mobileOpen}
@@ -245,7 +259,7 @@ export default function AppLayout({
             </div>
           </div>
           <div className="topbar-actions">
-            <TextField
+            {role !== "guest" && <TextField
               size="small"
               placeholder="Search anything..."
               value={search}
@@ -257,14 +271,21 @@ export default function AppLayout({
                 startAdornment: <InputAdornment position="start"><Search size={16} /></InputAdornment>,
                 endAdornment: <InputAdornment position="end"><kbd>Ctrl K</kbd></InputAdornment>,
               }}
-            />
-            <div className="role-preview"><span>Signed in</span><strong>{role}</strong></div>
+            />}
+            {role === "guest"
+              ? <Chip size="small" color="secondary" variant="outlined" label="Guest Mode — Read Only" />
+              : <div className="role-preview"><span>Signed in</span><strong>{role}</strong></div>}
+            {role === "guest" && (
+              <Button size="small" variant="contained" onClick={onUpgrade}>
+                Sign in
+              </Button>
+            )}
             <Tooltip title={darkMode ? "Switch to light mode" : "Switch to dark mode"}>
               <IconButton className="header-icon-button" aria-label="Toggle theme" onClick={onToggleTheme}>
                 {darkMode ? <Sun size={18} /> : <Moon size={18} />}
               </IconButton>
             </Tooltip>
-            <Tooltip title="Notifications">
+            {role !== "guest" && <Tooltip title="Notifications">
               <IconButton
                 className="header-icon-button notification-button"
                 aria-label={`${unreadCount} unread notifications`}
@@ -272,19 +293,19 @@ export default function AppLayout({
               >
                 <Badge badgeContent={unreadCount} color="error" max={9}><Bell size={18} /></Badge>
               </IconButton>
-            </Tooltip>
-            <Divider orientation="vertical" flexItem className="topbar-divider" />
-            <button className="topbar-user" onClick={(event) => setProfileAnchor(event.currentTarget)}>
+            </Tooltip>}
+            {role !== "guest" && <Divider orientation="vertical" flexItem className="topbar-divider" />}
+            {role !== "guest" && <button className="topbar-user" onClick={(event) => setProfileAnchor(event.currentTarget)}>
               <Avatar className="topbar-avatar">{user?.name?.split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</Avatar>
               <span><strong>{user?.name}</strong><small>{role}</small></span>
               <ChevronDown size={15} />
-            </button>
+            </button>}
           </div>
         </header>
         <main className="main-content">{children}</main>
       </div>
 
-      <Popover
+      {role !== "guest" && <Popover
         open={Boolean(notificationAnchor)}
         anchorEl={notificationAnchor}
         onClose={() => setNotificationAnchor(null)}
@@ -302,8 +323,8 @@ export default function AppLayout({
           ))}
           <button className="notification-footer" onClick={() => { setNotificationAnchor(null); navigate("/alerts"); }}>View all notifications</button>
         </div>
-      </Popover>
-      <Menu
+      </Popover>}
+      {role !== "guest" && <Menu
         anchorEl={profileAnchor}
         open={Boolean(profileAnchor)}
         onClose={() => setProfileAnchor(null)}
@@ -312,7 +333,7 @@ export default function AppLayout({
       >
         <MenuItem onClick={() => { setProfileAnchor(null); navigate("/profile"); }}>My profile</MenuItem>
         <MenuItem onClick={() => { setProfileAnchor(null); onLogout(); }}>Sign out</MenuItem>
-      </Menu>
+      </Menu>}
     </Box>
   );
 }

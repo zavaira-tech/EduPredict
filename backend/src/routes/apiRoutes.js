@@ -34,12 +34,12 @@ import {
 } from "../controllers/enrollmentController.js";
 import User from "../models/User.js";
 import asyncHandler from "../middleware/asyncHandler.js";
-import { authenticate } from "../middleware/authMiddleware.js";
+import { authenticateRegistered } from "../middleware/authMiddleware.js";
 import { authorizeRoles as allowRoles } from "../middleware/roleMiddleware.js";
 import mlRouter from "./mlRoutes.js";
 
 const router = Router();
-router.use(authenticate);
+router.use(authenticateRegistered);
 router.use("/ml", mlRouter);
 router.get("/dashboard/summary", allowRoles("admin", "analyst", "teacher", "student"), getSummary);
 const analyticsReaders = ["admin", "analyst", "teacher", "student"];

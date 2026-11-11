@@ -2,9 +2,10 @@ import bcrypt from "bcryptjs";
 import User from "../models/User.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 import generateToken from "../utils/generateToken.js";
+import generateGuestToken from "../utils/generateGuestToken.js";
 
 const publicUser = (user) => ({
-  id: user._id,
+  id: user._id ?? user.id,
   name: user.name,
   email: user.email,
   role: user.role,
@@ -52,8 +53,26 @@ export const login = asyncHandler(async (req, res) => {
   return res.json({ success: true, token: generateToken(user), user: publicUser(user) });
 });
 
+export const createGuestSession = asyncHandler(async (req, res) => {
+  const { guestId, token, expiresAt } = generateGuestToken();
+  return res.status(201).json({
+    success: true,
+    token,
+    expiresAt,
+    user: { id: guestId, name: "Guest visitor", role: "guest" },
+  });
+});
+
+export const logoutGuest = asyncHandler(async (req, res) => {
+  res.json({ success: true, message: "Guest session ended. Remove the token from this device." });
+});
+
 export const me = asyncHandler(async (req, res) => {
-  res.json({ success: true, user: publicUser(req.user) });
+  res.json({
+    success: true,
+    user: publicUser(req.user),
+    ...(req.user.role === "guest" ? { expiresAt: req.user.expiresAt } : {}),
+  });
 });
 
 export const logout = asyncHandler(async (req, res) => {

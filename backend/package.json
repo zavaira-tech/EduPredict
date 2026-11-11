@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
-    "test": "node --test ../tests/analytics.test.mjs ../tests/ml-service.test.mjs"
+    "test": "node --test ../tests/analytics.test.mjs ../tests/ml-service.test.mjs ../tests/guest-auth.test.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
