@@ -218,10 +218,17 @@ async function buildPredictionFeatures(modelType, studentId, courseId) {
       ...(enrollment.semester ? { semester: enrollment.semester } : {}),
     })
       .sort({ createdAt: -1 })
-      .select("assignmentScore quizScore midtermScore");
+      .select("assignmentScore quizScore midtermScore finalScore");
     if (!currentPerformance) {
       const error = new Error("No current assignment, quiz, or midterm record is available for this course.");
       error.status = 422;
+      throw error;
+    }
+    if (currentPerformance.finalScore > 0) {
+      const error = new Error(
+        "A final score is already recorded for this course; generate predictions before the final outcome is entered.",
+      );
+      error.status = 409;
       throw error;
     }
     return {
@@ -700,6 +707,7 @@ export const predict = asyncHandler(async (req, res) => {
     modelVersion: predictionResult.modelVersion,
     modelName: predictionResult.modelName,
     featuresUsed: predictionResult.featuresUsed,
+    inputFeatures: features,
     recommendations: predictionResult.recommendations || [],
     recommendation: predictionResult.recommendations?.join(" ") || "",
     explanation: predictionResult.mainContributingFactors || [],

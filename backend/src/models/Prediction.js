@@ -32,6 +32,7 @@ const predictionSchema = new mongoose.Schema(
     modelVersion: { type: String, trim: true },
     modelName: { type: String, trim: true },
     featuresUsed: [{ type: String, trim: true }],
+    inputFeatures: { type: mongoose.Schema.Types.Mixed },
     explanation: [{ type: mongoose.Schema.Types.Mixed }],
     details: { type: mongoose.Schema.Types.Mixed },
   },

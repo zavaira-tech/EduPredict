@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
+  Chip,
   CircularProgress,
+  Collapse,
+  IconButton,
   MenuItem,
   Paper,
   Table,
   TableBody,
   TableCell,
   TableHead,
+  TablePagination,
   TableRow,
   TextField,
   Typography,
@@ -111,34 +115,247 @@ export function ModelComparisonTable({ model }) {
 }
 
 export function PredictionHistoryTable({ predictions, role }) {
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("all");
+  const [page, setPage] = useState(0);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [expandedId, setExpandedId] = useState("");
+  const filtered = predictions.filter((item) => {
+    const matchesType = type === "all" ||
+      item.predictionType === type ||
+      (type === "course-demand" && item.predictionType === "courseDemand");
+    const haystack = [
+      item.student?.studentId,
+      item.student?.name,
+      item.course?.courseCode,
+      item.prediction,
+      item.riskLevel,
+      item.modelName,
+    ].filter(Boolean).join(" ").toLowerCase();
+    return matchesType && haystack.includes(query.trim().toLowerCase());
+  });
+  const visible = filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage);
+  const columnCount = role === "student" ? 6 : 7;
+
   if (!predictions.length) {
     return <Typography color="text.secondary">No predictions have been generated for the records you can access.</Typography>;
+  }
+  return (
+    <>
+      <div className="analytics-filters">
+        <TextField
+          label="Search predictions" size="small" value={query}
+          onChange={(event) => { setQuery(event.target.value); setPage(0); }}
+        />
+        <TextField
+          select label="Prediction type" size="small" value={type}
+          onChange={(event) => { setType(event.target.value); setPage(0); }}
+        >
+          <MenuItem value="all">All predictions</MenuItem>
+          {modelTypes.map((model) => <MenuItem key={model.value} value={model.value}>{model.label}</MenuItem>)}
+        </TextField>
+      </div>
+      {filtered.length ? (
+        <Table size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell />
+              <TableCell>Generated</TableCell>
+              {role !== "student" && <TableCell>Student</TableCell>}
+              <TableCell>Course</TableCell>
+              <TableCell>Prediction type</TableCell>
+              <TableCell>Result</TableCell>
+              <TableCell>Model</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {visible.map((item) => (
+              <>
+                <TableRow key={item._id}>
+                  <TableCell>
+                    <IconButton
+                      size="small"
+                      aria-label={expandedId === item._id ? "Hide prediction details" : "Show prediction details"}
+                      onClick={() => setExpandedId(expandedId === item._id ? "" : item._id)}
+                    >
+                      {expandedId === item._id ? "−" : "+"}
+                    </IconButton>
+                  </TableCell>
+                  <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "—"}</TableCell>
+                  {role !== "student" && <TableCell>{item.student?.studentId || item.student?.name || "—"}</TableCell>}
+                  <TableCell>{item.course?.courseCode || "—"}</TableCell>
+                  <TableCell>{modelTypeLabel(item.predictionType)}</TableCell>
+                  <TableCell>
+                    {item.riskLevel && <RiskBadge level={item.riskLevel} />}
+                    {typeof item.predictedValue === "number" ? item.predictedValue.toFixed(1) : item.predictedValue || item.prediction}
+                    {item.predictedGrade ? ` · ${item.predictedGrade}` : ""}
+                  </TableCell>
+                  <TableCell>{item.modelName ? `${item.modelName} ${item.modelVersion || ""}` : "—"}</TableCell>
+                </TableRow>
+                <TableRow key={`${item._id}-details`}>
+                  <TableCell colSpan={columnCount} sx={{ py: 0 }}>
+                    <Collapse in={expandedId === item._id} timeout="auto" unmountOnExit>
+                      <div style={{ padding: 16 }}>
+                        {item.inputFeatures && (
+                          <>
+                            <Typography variant="subtitle2">Academic features at prediction time</Typography>
+                            <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                              {Object.entries(item.inputFeatures)
+                                .map(([name, value]) => `${name.replace(/[A-Z]/g, (letter) => ` ${letter}`).trim()}: ${value ?? "Not available"}`)
+                                .join(" · ")}
+                            </Typography>
+                          </>
+                        )}
+                        {item.explanation?.length > 0 && (
+                          <>
+                            <Typography variant="subtitle2" sx={{ mt: 1 }}>Potential risk indicators (not causal)</Typography>
+                            <Typography color="text.secondary">
+                              {item.explanation.map((factor) => factor.indicator).filter(Boolean).join("; ")}
+                            </Typography>
+                          </>
+                        )}
+                        {(item.recommendations || []).length > 0 && (
+                          <>
+                            <Typography variant="subtitle2" sx={{ mt: 1 }}>Supportive recommendations</Typography>
+                            <Typography color="text.secondary">{item.recommendations.join(" · ")}</Typography>
+                          </>
+                        )}
+                        {item.details?.disclaimer && (
+                          <Typography color="text.secondary" variant="caption">{item.details.disclaimer}</Typography>
+                        )}
+                      </div>
+                    </Collapse>
+                  </TableCell>
+                </TableRow>
+              </>
+            ))}
+          </TableBody>
+        </Table>
+      ) : <Typography color="text.secondary">No prediction records match these filters.</Typography>}
+      <TablePagination
+        component="div"
+        count={filtered.length}
+        page={page}
+        rowsPerPage={rowsPerPage}
+        onPageChange={(_event, nextPage) => setPage(nextPage)}
+        onRowsPerPageChange={(event) => { setRowsPerPage(Number(event.target.value)); setPage(0); }}
+        rowsPerPageOptions={[5, 10, 25]}
+      />
+    </>
+  );
+}
+
+export function RiskBadge({ level }) {
+  const color = level === "High Risk" ? "error" : level === "Medium Risk" ? "warning" : "success";
+  return <Chip size="small" label={level} color={color} sx={{ mr: 1 }} />;
+}
+
+export function PerformancePredictionChart({ actualRecords, predictions }) {
+  const data = [
+    ...actualRecords
+      .filter((record) => Number.isFinite(record.finalScore))
+      .sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt))
+      .map((record, index) => ({ period: `History ${index + 1}`, historical: record.finalScore })),
+    ...predictions.map((item, index) => ({ period: `Prediction ${index + 1}`, predicted: item.predictedValue })),
+  ];
+  return data.length ? (
+    <ResponsiveContainer width="100%" height={260}>
+      <LineChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="period" />
+        <YAxis domain={[0, 100]} />
+        <Tooltip />
+        <Legend />
+        <Line type="monotone" dataKey="predicted" name="Predicted final score" stroke="#356ae6" />
+        <Line type="monotone" dataKey="historical" name="Historical final score" stroke="#14a991" />
+      </LineChart>
+    </ResponsiveContainer>
+  ) : <Typography color="text.secondary">No performance predictions are available yet.</Typography>;
+}
+
+export function DropoutRiskChart({ predictions }) {
+  const data = ["Low Risk", "Medium Risk", "High Risk"].map((name) => ({
+    name,
+    value: predictions.filter((item) => item.riskLevel === name).length,
+  })).filter((item) => item.value > 0);
+  return data.length ? (
+    <ResponsiveContainer width="100%" height={260}>
+      <PieChart>
+        <Pie data={data} dataKey="value" nameKey="name" outerRadius={85} label>
+          {data.map((item) => <Cell key={item.name} fill={riskColors[item.name]} />)}
+        </Pie>
+        <Tooltip />
+        <Legend />
+      </PieChart>
+    </ResponsiveContainer>
+  ) : <Typography color="text.secondary">No dropout predictions are available yet.</Typography>;
+}
+
+export function CourseDemandChart({ predictions }) {
+  const data = predictions.map((item, index) => ({
+    forecast: `${index + 1}`,
+    enrollment: item.predictedValue,
+  }));
+  return data.length ? (
+    <ResponsiveContainer width="100%" height={260}>
+      <BarChart data={data}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis dataKey="forecast" />
+        <YAxis />
+        <Tooltip />
+        <Bar dataKey="enrollment" name="Predicted enrollment" fill="#14a991" />
+      </BarChart>
+    </ResponsiveContainer>
+  ) : <Typography color="text.secondary">No course-demand forecasts are available yet.</Typography>;
+}
+
+export function FeatureImportanceChart({ features }) {
+  const data = (features || [])
+    .filter((item) => Number.isFinite(item.importance))
+    .sort((left, right) => Math.abs(right.importance) - Math.abs(left.importance))
+    .slice(0, 8)
+    .map((item) => ({ ...item, feature: item.feature.replace(/[A-Z]/g, (letter) => ` ${letter}`).trim() }));
+  return data.length ? (
+    <ResponsiveContainer width="100%" height={260}>
+      <BarChart data={data} layout="vertical" margin={{ left: 20 }}>
+        <CartesianGrid strokeDasharray="3 3" />
+        <XAxis type="number" />
+        <YAxis type="category" dataKey="feature" width={155} />
+        <Tooltip />
+        <Bar dataKey="importance" name="Permutation importance" fill="#356ae6" />
+      </BarChart>
+    </ResponsiveContainer>
+  ) : <Typography color="text.secondary">No feature-importance values are available.</Typography>;
+}
+
+export function ModelTrainingHistory({ evaluation }) {
+  const records = Object.values(evaluation || {}).flatMap((model) =>
+    (model.history || []).map((item) => ({ ...item })),
+  ).sort((left, right) => new Date(right.trainedAt) - new Date(left.trainedAt));
+  if (!records.length) {
+    return <Typography color="text.secondary">No models have been trained.</Typography>;
   }
   return (
     <Table size="small">
       <TableHead>
         <TableRow>
-          <TableCell>Generated</TableCell>
-          {role !== "student" && <TableCell>Student</TableCell>}
-          <TableCell>Course</TableCell>
-          <TableCell>Prediction type</TableCell>
-          <TableCell>Result</TableCell>
           <TableCell>Model</TableCell>
+          <TableCell>Version</TableCell>
+          <TableCell>Algorithm</TableCell>
+          <TableCell>Trained</TableCell>
+          <TableCell align="right">Dataset size</TableCell>
+          <TableCell>Selection rule</TableCell>
         </TableRow>
       </TableHead>
       <TableBody>
-        {predictions.map((item) => (
-          <TableRow key={item._id}>
-            <TableCell>{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "—"}</TableCell>
-            {role !== "student" && <TableCell>{item.student?.studentId || item.student?.name || "—"}</TableCell>}
-            <TableCell>{item.course?.courseCode || "—"}</TableCell>
-            <TableCell>{modelTypeLabel(item.predictionType)}</TableCell>
-            <TableCell>
-              {typeof item.predictedValue === "number" ? item.predictedValue.toFixed(1) : item.predictedValue || item.prediction}
-              {item.predictedGrade ? ` · ${item.predictedGrade}` : ""}
-              {item.riskLevel ? ` · ${item.riskLevel}` : ""}
-            </TableCell>
-            <TableCell>{item.modelName ? `${item.modelName} ${item.modelVersion || ""}` : "—"}</TableCell>
+        {records.map((item) => (
+          <TableRow key={item.modelId}>
+            <TableCell>{item.modelName}</TableCell>
+            <TableCell>{item.modelVersion}</TableCell>
+            <TableCell>{item.algorithm}</TableCell>
+            <TableCell>{new Date(item.trainedAt).toLocaleString()}</TableCell>
+            <TableCell align="right">{item.datasetSize}</TableCell>
+            <TableCell>{item.selectionRule}</TableCell>
           </TableRow>
         ))}
       </TableBody>

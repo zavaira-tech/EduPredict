@@ -35,6 +35,7 @@ from sklearn.metrics import (
     roc_auc_score,
 )
 from sklearn.pipeline import Pipeline
+from sklearn.inspection import permutation_importance
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 LOGGER = logging.getLogger("edupredict.ml")
@@ -472,6 +473,14 @@ class ModelRegistry:
                 selected = min(candidate_results, key=lambda result: result["selectionScore"])
                 selection_metric = "rmse"
 
+            importance_result = permutation_importance(
+                selected["pipeline"],
+                x_test,
+                y_test,
+                n_repeats=5,
+                random_state=SEED,
+                scoring="recall" if config["kind"] == "classification" else "neg_mean_absolute_error",
+            )
             model_id = str(uuid.uuid4())
             version = f"1.0.{len(self._history[model_type]) + 1}"
             artifact_name = f"{model_id}.joblib"
@@ -489,6 +498,19 @@ class ModelRegistry:
                 "trainingSize": int(len(x_train)),
                 "testSize": int(len(x_test)),
                 "featureList": config["numeric"] + config["categorical"],
+                "featureImportance": [
+                    {
+                        "feature": feature,
+                        "importance": float(importance),
+                        "standardDeviation": float(deviation),
+                    }
+                    for feature, importance, deviation in zip(
+                        config["numeric"] + config["categorical"],
+                        importance_result.importances_mean,
+                        importance_result.importances_std,
+                        strict=True,
+                    )
+                ],
                 "metrics": selected["metrics"],
                 "selectionMetric": selection_metric,
                 "selectionRule": (
