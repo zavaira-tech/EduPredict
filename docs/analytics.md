@@ -121,8 +121,52 @@ present, both are required and service errors are returned explicitly rather
 than silently falling back. Do not expose the Python service publicly without
 TLS and network access controls.
 
+## Machine-learning service
+
+The ML service is separate from the optional statistics service and has no
+MongoDB connection. Express authenticates every request, authorizes the role
+and record scope, prepares real academic training snapshots, and sends only
+the selected features and outcomes. Training is administrator-only;
+predictions are appended to prediction history and never replace older
+predictions. Students can access only their own records, and teachers are
+restricted to assigned courses. The service URL and a shared random
+`ML_SERVICE_API_KEY` are configured in `backend/.env`; keep the service on a
+private interface and do not expose its key to the browser.
+
+Run the ML service independently from the analytics service (default port
+8001 versus 8000):
+
+```powershell
+cd ml-service
+py -3.12 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+$env:ML_SERVICE_API_KEY = [guid]::NewGuid().ToString() + [guid]::NewGuid().ToString()
+uvicorn app:app --host 127.0.0.1 --port 8001
+```
+
+Set the same key and `ML_SERVICE_URL=http://127.0.0.1:8001` in
+`backend/.env`. Use a separate key from `ANALYTICS_SERVICE_API_KEY`. Restart
+Express after changing environment variables. The dashboard is available at
+`/ml`; only administrators see training controls, while model evaluation is
+available to administrators and analysts.
+
+The performance learner is selected among linear regression, random forest,
+and gradient boosting by chronological holdout RMSE. The dropout learner
+compares logistic regression, random forest, and gradient boosting, prioritizes
+dropout-class recall, and reports accuracy, precision, recall, F1, ROC-AUC, and
+the confusion matrix. Course demand compares regression candidates on a
+chronological holdout and uses lagged enrollment. The backend excludes
+incomplete/censored outcomes, and the service rejects insufficient or
+single-period datasets. Evaluation reports `Not Trained` until actual training
+succeeds. The exact data requirements, preprocessing, Windows instructions,
+and synthetic-only test fixtures are in [ml-service/README.md](../ml-service/README.md).
+
 ## Tests
 
 From the repository root, run `npm --prefix backend test`. The tests cover the
-correlation calculation, risk thresholds, quartile interpolation, and CSV
-escaping. Build the dashboard with `npm --prefix frontend run build`.
+correlation calculation, risk thresholds, quartile interpolation, CSV escaping,
+and the ML service boundary. Run the Python ML tests after installing
+`ml-service/requirements.txt` by changing to `ml-service/` and running
+`python -m unittest discover -s tests -p "test_*.py"`. Build the dashboard with
+`npm --prefix frontend run build`.

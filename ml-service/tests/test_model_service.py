@@ -1,11 +1,13 @@
 import tempfile
 import unittest
+from datetime import date, timedelta
 from pathlib import Path
 
 from services.model_service import ModelRegistry, TrainingError, _demand_training_rows, _validate_records
 
 
 def performance_records(count: int = 40) -> list[dict[str, object]]:
+    start = date(2024, 1, 1)
     return [
         {
             "previousGpa": 1.5 + (index % 25) / 10,
@@ -18,7 +20,7 @@ def performance_records(count: int = 40) -> list[dict[str, object]]:
             "semester": 1 + index % 8,
             "department": "Science" if index % 2 else "Arts",
             "finalScore": 30 + (index * 9) % 71,
-            "snapshotDate": f"2024-01-{index + 1:02d}T12:00:00Z",
+            "snapshotDate": f"{start + timedelta(days=index)}T12:00:00Z",
         }
         for index in range(count)
     ]
@@ -114,9 +116,12 @@ class ModelServiceTests(unittest.TestCase):
             self.assertGreaterEqual(prediction["predictedEnrollment"], 0)
 
     def test_course_demand_rejects_insufficient_history(self) -> None:
-        records = demand_records()
+        records = [
+            item for item in demand_records()
+            if item["academicYear"] in {"2020-2021", "2021-2022"}
+        ]
         with self.assertRaisesRegex(TrainingError, "at least 4 distinct academic periods"):
-            _demand_training_rows(records[:8])
+            _demand_training_rows(records)
 
     def test_failed_training_does_not_replace_active_model(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

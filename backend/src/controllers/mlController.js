@@ -339,21 +339,24 @@ async function loadPerformanceTrainingRecords() {
       .select("student course assignmentScore quizScore midtermScore finalScore gpa semester academicYear createdAt")
       .populate("student", "department")
       .populate("course", "courseCode department")
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
     Attendance.find()
       .select("student status percentage createdAt")
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
     Enrollment.find()
       .select("student course academicYear semester status createdAt")
       .populate("course", "courseCode")
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
   ]);
+  performances.sort((left, right) => left.createdAt - right.createdAt);
+  attendances.sort((left, right) => left.createdAt - right.createdAt);
+  enrollments.sort((left, right) => left.createdAt - right.createdAt);
   const completedPeriods = new Set(
     enrollments
       .filter((record) => record.status === "completed" && record.academicYear && record.semester)
@@ -385,30 +388,85 @@ async function loadPerformanceTrainingRecords() {
     enrollmentByPeriod.get(key).push(record);
   }
 
-  return completedPerformances.map((record) => {
+  const performanceCursors = new Map();
+  const performanceStates = new Map();
+  const attendanceCursors = new Map();
+  const attendanceStates = new Map();
+  const enrollmentCursors = new Map();
+  const trainingRecords = [];
+  for (const record of completedPerformances) {
     const timestamp = record.createdAt || new Date(0);
     const studentKey = String(record.student?._id || record.student);
-    const priorPerformance = (performanceByStudent.get(studentKey) || []).filter(
-      (item) => item.createdAt && item.createdAt < timestamp,
-    );
+    const studentPerformances = performanceByStudent.get(studentKey) || [];
+    let performanceCursor = performanceCursors.get(studentKey) || 0;
+    const performanceState = performanceStates.get(studentKey) || {
+      gpaTotal: 0, gpaCount: 0, scoreTotal: 0, scoreCount: 0,
+    };
+    while (
+      performanceCursor < studentPerformances.length &&
+      studentPerformances[performanceCursor].createdAt < timestamp
+    ) {
+      const previous = studentPerformances[performanceCursor++];
+      if (Number.isFinite(previous.gpa)) {
+        performanceState.gpaTotal += previous.gpa;
+        performanceState.gpaCount += 1;
+      }
+      if (Number.isFinite(previous.finalScore)) {
+        performanceState.scoreTotal += previous.finalScore;
+        performanceState.scoreCount += 1;
+      }
+    }
+    performanceCursors.set(studentKey, performanceCursor);
+    performanceStates.set(studentKey, performanceState);
+
+    const studentAttendances = attendanceByStudent.get(studentKey) || [];
+    let attendanceCursor = attendanceCursors.get(studentKey) || 0;
+    const attendanceState = attendanceStates.get(studentKey) || { total: 0, count: 0 };
+    while (
+      attendanceCursor < studentAttendances.length &&
+      studentAttendances[attendanceCursor].createdAt < timestamp
+    ) {
+      const attendance = studentAttendances[attendanceCursor++];
+      attendanceState.total += typeof attendance.percentage === "number"
+        ? attendance.percentage / 100
+        : attendance.status === "Present" ? 1 : attendance.status === "Late" ? 0.5 : 0;
+      attendanceState.count += 1;
+    }
+    attendanceCursors.set(studentKey, attendanceCursor);
+    attendanceStates.set(studentKey, attendanceState);
+
     const periodKey = `${record.course?.courseCode || ""}|${record.academicYear || ""}|${record.semester || ""}`;
-    const courseEnrollment = (enrollmentByPeriod.get(periodKey) || []).filter(
-      (item) => item.createdAt && item.createdAt < timestamp,
-    ).length;
-    return {
-      previousGpa: average(priorPerformance, "gpa"),
-      attendancePercentage: attendanceSummary(attendanceByStudent.get(studentKey) || [], timestamp),
+    const periodEnrollments = enrollmentByPeriod.get(periodKey) || [];
+    const periodCursor = enrollmentCursors.get(periodKey) || 0;
+    let nextPeriodCursor = periodCursor;
+    while (
+      nextPeriodCursor < periodEnrollments.length &&
+      periodEnrollments[nextPeriodCursor].createdAt < timestamp
+    ) {
+      nextPeriodCursor += 1;
+    }
+    enrollmentCursors.set(periodKey, nextPeriodCursor);
+    trainingRecords.push({
+      previousGpa: performanceState.gpaCount
+        ? performanceState.gpaTotal / performanceState.gpaCount
+        : null,
+      attendancePercentage: attendanceState.count
+        ? attendanceState.total / attendanceState.count * 100
+        : null,
       assignmentAverage: Number.isFinite(record.assignmentScore) ? record.assignmentScore : null,
       quizAverage: Number.isFinite(record.quizScore) ? record.quizScore : null,
       midtermScore: Number.isFinite(record.midtermScore) ? record.midtermScore : null,
-      previousSemesterPerformance: average(priorPerformance, "finalScore"),
-      courseEnrollment,
+      previousSemesterPerformance: performanceState.scoreCount
+        ? performanceState.scoreTotal / performanceState.scoreCount
+        : null,
+      courseEnrollment: nextPeriodCursor,
       department: record.course?.department || record.student?.department || null,
       semester: record.semester || null,
       snapshotDate: timestamp.toISOString(),
       finalScore: record.finalScore,
-    };
-  });
+    });
+  }
+  return trainingRecords;
 }
 
 async function loadDropoutTrainingRecords() {
@@ -416,21 +474,24 @@ async function loadDropoutTrainingRecords() {
     Enrollment.find({ status: { $in: ["completed", "dropped"] } })
       .select("student course status semester enrolledAt createdAt")
       .populate("course", "department")
-      .sort({ createdAt: 1 })
+      .sort({ enrolledAt: -1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
     Performance.find({ finalScore: { $gt: 0 } })
       .select("student gpa totalScore finalScore createdAt")
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
     Attendance.find()
       .select("student status percentage createdAt")
-      .sort({ createdAt: 1 })
+      .sort({ createdAt: -1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
     Student.find().select("_id department").lean(),
   ]);
+  enrollments.sort((left, right) => left.enrolledAt - right.enrolledAt);
+  performances.sort((left, right) => left.createdAt - right.createdAt);
+  attendances.sort((left, right) => left.createdAt - right.createdAt);
   const studentById = new Map(students.map((item) => [String(item._id), item]));
   const enrollmentByStudent = new Map();
   const performanceByStudent = new Map();
@@ -451,41 +512,102 @@ async function loadDropoutTrainingRecords() {
     attendanceByStudent.get(key).push(record);
   }
 
-  return enrollments.map((record) => {
+  const enrollmentCursors = new Map();
+  const enrollmentStates = new Map();
+  const performanceCursors = new Map();
+  const performanceStates = new Map();
+  const attendanceCursors = new Map();
+  const attendanceStates = new Map();
+  const trainingRecords = [];
+  for (const record of enrollments) {
     const studentKey = String(record.student);
     const timestamp = record.enrolledAt || record.createdAt || new Date(0);
-    const priorEnrollments = (enrollmentByStudent.get(studentKey) || []).filter(
-      (item) => item.enrolledAt && item.enrolledAt < timestamp,
-    );
-    const priorPerformance = (performanceByStudent.get(studentKey) || []).filter(
-      (item) => item.createdAt && item.createdAt < timestamp,
-    );
-    const completed = priorEnrollments.filter((item) => item.status === "completed").length;
-    const priorAttendance = attendanceSummary(attendanceByStudent.get(studentKey) || [], timestamp);
-    return {
-      attendancePercentage: priorAttendance,
-      gpa: average(priorPerformance, "gpa"),
-      failedCourses: priorPerformance.filter(
-        (item) => (Number.isFinite(item.gpa) && item.gpa < 2) ||
-          (Number.isFinite(item.totalScore) && item.totalScore < 60),
-      ).length,
-      previousPerformance: average(priorPerformance, "finalScore"),
+    const studentEnrollments = enrollmentByStudent.get(studentKey) || [];
+    let enrollmentCursor = enrollmentCursors.get(studentKey) || 0;
+    const enrollmentState = enrollmentStates.get(studentKey) || { count: 0, completed: 0 };
+    while (
+      enrollmentCursor < studentEnrollments.length &&
+      studentEnrollments[enrollmentCursor].enrolledAt < timestamp
+    ) {
+      const previous = studentEnrollments[enrollmentCursor++];
+      enrollmentState.count += 1;
+      if (previous.status === "completed") enrollmentState.completed += 1;
+    }
+    enrollmentCursors.set(studentKey, enrollmentCursor);
+    enrollmentStates.set(studentKey, enrollmentState);
+
+    const studentPerformances = performanceByStudent.get(studentKey) || [];
+    let performanceCursor = performanceCursors.get(studentKey) || 0;
+    const performanceState = performanceStates.get(studentKey) || {
+      gpaTotal: 0, gpaCount: 0, scoreTotal: 0, scoreCount: 0, failedCourses: 0,
+    };
+    while (
+      performanceCursor < studentPerformances.length &&
+      studentPerformances[performanceCursor].createdAt < timestamp
+    ) {
+      const previous = studentPerformances[performanceCursor++];
+      if (Number.isFinite(previous.gpa)) {
+        performanceState.gpaTotal += previous.gpa;
+        performanceState.gpaCount += 1;
+      }
+      if (Number.isFinite(previous.finalScore)) {
+        performanceState.scoreTotal += previous.finalScore;
+        performanceState.scoreCount += 1;
+      }
+      if (
+        (Number.isFinite(previous.gpa) && previous.gpa < 2) ||
+        (Number.isFinite(previous.totalScore) && previous.totalScore < 60)
+      ) {
+        performanceState.failedCourses += 1;
+      }
+    }
+    performanceCursors.set(studentKey, performanceCursor);
+    performanceStates.set(studentKey, performanceState);
+
+    const studentAttendances = attendanceByStudent.get(studentKey) || [];
+    let attendanceCursor = attendanceCursors.get(studentKey) || 0;
+    const attendanceState = attendanceStates.get(studentKey) || { total: 0, count: 0 };
+    while (
+      attendanceCursor < studentAttendances.length &&
+      studentAttendances[attendanceCursor].createdAt < timestamp
+    ) {
+      const attendance = studentAttendances[attendanceCursor++];
+      attendanceState.total += typeof attendance.percentage === "number"
+        ? attendance.percentage / 100
+        : attendance.status === "Present" ? 1 : attendance.status === "Late" ? 0.5 : 0;
+      attendanceState.count += 1;
+    }
+    attendanceCursors.set(studentKey, attendanceCursor);
+    attendanceStates.set(studentKey, attendanceState);
+    trainingRecords.push({
+      attendancePercentage: attendanceState.count
+        ? attendanceState.total / attendanceState.count * 100
+        : null,
+      gpa: performanceState.gpaCount
+        ? performanceState.gpaTotal / performanceState.gpaCount
+        : null,
+      failedCourses: performanceState.failedCourses,
+      previousPerformance: performanceState.scoreCount
+        ? performanceState.scoreTotal / performanceState.scoreCount
+        : null,
       semesterProgression: record.semester,
-      enrollmentHistory: priorEnrollments.length,
-      courseCompletionHistory: priorEnrollments.length
-        ? completed / priorEnrollments.length * 100
+      enrollmentHistory: enrollmentState.count,
+      courseCompletionHistory: enrollmentState.count
+        ? enrollmentState.completed / enrollmentState.count * 100
         : null,
       department: record.course?.department || studentById.get(studentKey)?.department || null,
       snapshotDate: timestamp.toISOString(),
       dropped: record.status === "dropped" ? 1 : 0,
-    };
-  });
+    });
+  }
+  return trainingRecords;
 }
 
 async function loadCourseDemandTrainingRecords() {
   const enrollments = await Enrollment.find()
     .select("course academicYear semester status")
     .populate("course", "courseCode department")
+    .sort({ createdAt: -1 })
     .limit(MAX_TRAINING_RECORDS)
     .lean();
   const totals = new Map();
@@ -525,6 +647,7 @@ export const trainModel = asyncHandler(async (req, res) => {
   const result = await callMlService(`/api/ml/train/${modelType}`, {
     method: "POST",
     body: { records },
+    timeoutMs: 300_000,
   });
   res.json({ success: true, data: result });
 });
@@ -588,6 +711,19 @@ export const predict = asyncHandler(async (req, res) => {
 export const listModels = asyncHandler(async (_req, res) => {
   const data = await callMlService("/api/ml/models");
   res.json({ success: true, data });
+});
+
+export const getModelStatus = asyncHandler(async (_req, res) => {
+  const models = await callMlService("/api/ml/models");
+  res.json({
+    success: true,
+    data: models.map((model) => ({
+      modelType: model.modelType,
+      status: model.status,
+      algorithm: model.active?.algorithm || null,
+      modelVersion: model.active?.modelVersion || null,
+    })),
+  });
 });
 
 export const getModel = asyncHandler(async (req, res) => {

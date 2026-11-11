@@ -24,17 +24,28 @@ function serviceConfiguration() {
   return { baseUrl: url.toString().replace(/\/$/, ""), apiKey };
 }
 
-export async function callMlService(path, { method = "GET", body } = {}) {
+export async function callMlService(path, { method = "GET", body, timeoutMs = 15_000 } = {}) {
   const { baseUrl, apiKey } = serviceConfiguration();
-  const response = await fetch(`${baseUrl}${path}`, {
-    method,
-    headers: {
-      "X-ML-Service-Key": apiKey,
-      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
-    },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(60_000),
-  });
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers: {
+        "X-ML-Service-Key": apiKey,
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (requestError) {
+    const error = new Error(
+      requestError.name === "TimeoutError"
+        ? "The machine-learning service request timed out."
+        : "The machine-learning service is unavailable.",
+    );
+    error.status = requestError.name === "TimeoutError" ? 504 : 503;
+    throw error;
+  }
   let payload;
   try {
     payload = await response.json();

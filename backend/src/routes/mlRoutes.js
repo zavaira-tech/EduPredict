@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   getEvaluation,
   getModel,
+  getModelStatus,
   listModels,
   listPredictionHistory,
   predict,
@@ -22,6 +23,11 @@ router.get(
   "/predictions",
   authorizeRoles("admin", "analyst", "teacher", "student"),
   listPredictionHistory,
+);
+router.get(
+  "/status",
+  authorizeRoles("admin", "analyst", "teacher", "student"),
+  getModelStatus,
 );
 router.get("/models", authorizeRoles("admin", "analyst"), listModels);
 router.get("/models/:modelId", authorizeRoles("admin", "analyst"), getModel);

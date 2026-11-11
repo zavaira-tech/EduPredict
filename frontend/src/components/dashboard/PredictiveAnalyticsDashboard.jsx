@@ -164,6 +164,7 @@ export default function PredictiveAnalyticsDashboard({ user }) {
   const canTrain = user?.role === "admin";
   const canViewMetrics = ["admin", "analyst"].includes(user?.role);
   const [evaluation, setEvaluation] = useState(null);
+  const [modelStatus, setModelStatus] = useState({});
   const [predictions, setPredictions] = useState([]);
   const [students, setStudents] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -178,7 +179,7 @@ export default function PredictiveAnalyticsDashboard({ user }) {
 
   const loadData = useCallback(async () => {
     setError("");
-    const requests = [api.get("/ml/predictions")];
+    const requests = [api.get("/ml/predictions"), api.get("/ml/status")];
     if (canViewMetrics) requests.push(api.get("/ml/evaluation"));
     if (canGenerate) {
       requests.push(api.get("/students"));
@@ -191,7 +192,12 @@ export default function PredictiveAnalyticsDashboard({ user }) {
     } else {
       setError(results[0].reason.response?.data?.message || "Unable to load prediction history.");
     }
-    let resultIndex = 1;
+    if (results[1].status === "fulfilled") {
+      setModelStatus(Object.fromEntries((results[1].value.data.data || []).map((model) => [model.modelType, model])));
+    } else {
+      setError((current) => current || results[1].reason.response?.data?.message || "Unable to load model status.");
+    }
+    let resultIndex = 2;
     if (canViewMetrics) {
       const result = results[resultIndex++];
       if (result.status === "fulfilled") setEvaluation(result.value.data.data);
@@ -262,6 +268,9 @@ export default function PredictiveAnalyticsDashboard({ user }) {
   const performanceModel = modelData(evaluation, "performance");
   const dropoutModel = modelData(evaluation, "dropout");
   const demandModel = modelData(evaluation, "course-demand");
+  const performanceStatus = modelStatus.performance;
+  const dropoutStatus = modelStatus.dropout;
+  const demandStatus = modelStatus["course-demand"];
   const riskDistribution = ["Low Risk", "Medium Risk", "High Risk"].map((name) => ({
     name,
     value: predictions.filter((item) => item.predictionType === "dropout" && item.riskLevel === name).length,
@@ -340,13 +349,14 @@ export default function PredictiveAnalyticsDashboard({ user }) {
         </Paper>
       )}
 
+      <div className="kpi-grid">
+        <Metric label="Performance model" value={performanceStatus?.status === "trained" ? performanceStatus.algorithm || "Ready" : "Not Trained"} />
+        <Metric label="Dropout model" value={dropoutStatus?.status === "trained" ? dropoutStatus.algorithm || "Ready" : "Not Trained"} />
+        <Metric label="Course-demand model" value={demandStatus?.status === "trained" ? demandStatus.algorithm || "Ready" : "Not Trained"} />
+      </div>
+
       {canViewMetrics && (
         <>
-          <div className="kpi-grid">
-            <Metric label="Performance model" value={performanceModel.status === "trained" ? performanceModel.active.algorithm : "Not Trained"} />
-            <Metric label="Dropout model" value={dropoutModel.status === "trained" ? dropoutModel.active.algorithm : "Not Trained"} />
-            <Metric label="Course-demand model" value={demandModel.status === "trained" ? demandModel.active.algorithm : "Not Trained"} />
-          </div>
           <div className="analytics-grid">
             <ModelMetricsCard
               title="Performance evaluation"
