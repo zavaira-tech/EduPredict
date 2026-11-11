@@ -14,16 +14,6 @@ dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env"
 const clientUrl = process.env.CLIENT_URL || process.env.CORS_ORIGIN || "http://localhost:5173";
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
 const port = Number(process.env.PORT || 5000);
-
-if (!mongoUri) {
-  throw new Error("MONGODB_URI is required. Create backend/.env from .env.example.");
-}
-
-if (mongoUri.includes("<URL_ENCODED_PASSWORD>") || mongoUri.includes("<DB_PASSWORD>")) {
-  throw new Error(
-    "Replace the password placeholder in backend/.env with your URL-encoded database password.",
-  );
-}
 if (
   !process.env.JWT_SECRET ||
   process.env.JWT_SECRET.length < 32 ||
@@ -47,22 +37,33 @@ app.use("/api", apiRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
 
-try {
-  await connectToDatabase(mongoUri);
-  console.log(`MongoDB connected successfully (database: ${mongoose.connection.name}).`);
-} catch (error) {
-  const reason = error instanceof Error ? error.name : "UnknownError";
-  console.error(
-    `Unable to connect to MongoDB (${reason}). Check the Atlas URI, database user, Network Access IP list, and cluster status. Credentials are not shown.`,
-  );
+const hasMongoUri =
+  typeof mongoUri === "string" &&
+  mongoUri.length > 0 &&
+  !mongoUri.includes("<URL_ENCODED_PASSWORD>") &&
+  !mongoUri.includes("<DB_PASSWORD>");
+
+if (hasMongoUri) {
   try {
-    await mongoose.disconnect();
-  } catch (cleanupError) {
-    const cleanupReason =
-      cleanupError instanceof Error ? cleanupError.name : "UnknownError";
-    console.error(`MongoDB cleanup failed (${cleanupReason}).`);
+    await connectToDatabase(mongoUri);
+    console.log(`MongoDB connected successfully (database: ${mongoose.connection.name}).`);
+  } catch (error) {
+    const reason = error instanceof Error ? error.name : "UnknownError";
+    console.error(
+      `Unable to connect to MongoDB (${reason}). Guest sessions remain available; registered-user and academic-data APIs require a working MongoDB connection. Credentials are not shown.`,
+    );
+    try {
+      await mongoose.disconnect();
+    } catch (cleanupError) {
+      const cleanupReason =
+        cleanupError instanceof Error ? cleanupError.name : "UnknownError";
+      console.error(`MongoDB cleanup failed (${cleanupReason}).`);
+    }
   }
-  throw new Error("MongoDB connection failed; check the server environment configuration.");
+} else {
+  console.warn(
+    "MONGODB_URI is missing or still contains a template password. Guest sessions remain available; registered-user and academic-data APIs require MongoDB.",
+  );
 }
 
 if (process.env.VERCEL !== "1") {

@@ -26,6 +26,15 @@ Guest JWTs are stateless and cannot be individually revoked server-side; logout
 clears the token in the browser, and any copied token expires within one hour.
 Even before expiry, a guest token cannot access the protected data API.
 
+The Express process can start in a guest-only degraded state if
+`MONGODB_URI` is missing or still contains a template password, or if MongoDB
+cannot be reached. It logs this state and `/api/health` returns HTTP 503 with
+`"database": "disconnected"`. Guest session creation and logout remain
+available because they do not use MongoDB. Registration, registered-user
+authentication, and all academic-data APIs remain unavailable until MongoDB
+is configured and connected; these APIs return HTTP 503 rather than granting
+access or pretending the database is healthy.
+
 ## Permission matrix
 
 | Capability | Guest | Admin | Teacher | Student | Analyst |
@@ -42,10 +51,11 @@ are deny-by-default for every data API.
 
 ## Run and verify
 
-Use the existing project setup: configure `backend/.env` with MongoDB and a
-random `JWT_SECRET` of at least 32 characters, then run the backend and
-frontend using the commands in the repository README. No additional setting,
-database migration, or dependency is required.
+Use the existing project setup and set `JWT_SECRET` in `backend/.env` to a
+random value of at least 32 characters. To restore registered-user and
+academic-data features, also replace the Atlas password placeholder in
+`MONGODB_URI` with the URL-encoded database password. No secret belongs in the
+frontend or source control. No database migration or dependency is required.
 
 1. Open the sign-in page and select **Continue as Guest**.
 2. Verify the browser opens `/guest`, shows **Guest Mode — Read Only**, and

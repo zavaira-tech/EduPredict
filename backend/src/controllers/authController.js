@@ -57,6 +57,7 @@ export const createGuestSession = asyncHandler(async (req, res) => {
   const { guestId, token, expiresAt } = generateGuestToken();
   return res.status(201).json({
     success: true,
+    message: "Guest session started successfully.",
     token,
     expiresAt,
     user: { id: guestId, name: "Guest visitor", role: "guest" },

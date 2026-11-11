@@ -54,6 +54,17 @@ function GuestRouteNotice() {
   return <Navigate to="/guest" replace state={{ guestMessage: "This section is available to registered users only. Guest mode is read-only." }} />;
 }
 
+function authRequestError(error, fallback) {
+  if (error.response?.data?.message) return error.response.data.message;
+  if (error.code === "ERR_NETWORK") {
+    return `Cannot reach the EduPredict API at ${api.defaults.baseURL}. Start the backend and verify its port and frontend origin.`;
+  }
+  if (error.code === "ECONNABORTED") {
+    return "The EduPredict API request timed out. Check that the backend and its configured services are responsive.";
+  }
+  return error.message || fallback;
+}
+
 function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", initialNotice = "" }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
@@ -70,7 +81,7 @@ function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", init
       localStorage.setItem("edupredict-token", data.token);
       onAuthenticated(data.user);
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to connect to the EduPredict API.");
+      setError(authRequestError(requestError, "Unable to sign in."));
     } finally {
       setSaving(false);
     }
@@ -83,7 +94,7 @@ function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", init
     try {
       await onContinueAsGuest();
     } catch (requestError) {
-      setError(requestError.response?.data?.message || "Unable to start a guest session.");
+      setError(authRequestError(requestError, "Unable to start a guest session."));
     } finally {
       setSaving(false);
     }

@@ -120,9 +120,22 @@ test("the guest API flow works while protected data APIs reject guest tokens", a
   const createResponse = await fetch(`${baseUrl}/auth/guest`, { method: "POST" });
   assert.equal(createResponse.status, 201);
   const session = await createResponse.json();
+  assert.equal(session.message, "Guest session started successfully.");
   assert.equal(session.user.role, "guest");
   assert.equal(session.user.email, undefined);
   assert.ok(session.expiresAt);
+
+  for (const [path, body] of [
+    ["/auth/login", { email: "student@example.test", password: "example-password" }],
+    ["/auth/register", { name: "Student", email: "new@example.test", password: "example-password" }],
+  ]) {
+    const response = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 503, `${path} requires a connected database`);
+  }
 
   const authorization = { Authorization: `Bearer ${session.token}` };
   const identityResponse = await fetch(`${baseUrl}/auth/me`, { headers: authorization });

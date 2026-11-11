@@ -1,4 +1,5 @@
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 import User from "../models/User.js";
 import asyncHandler from "./asyncHandler.js";
 
@@ -45,6 +46,13 @@ async function resolveIdentity(req, res) {
       typeof payload.tokenVersion !== "number"
     ) {
       res.status(401).json({ success: false, message: "Invalid authentication token." });
+      return null;
+    }
+    if (mongoose.connection.readyState !== 1) {
+      res.status(503).json({
+        success: false,
+        message: "The database is unavailable. Registered-user authentication requires MongoDB.",
+      });
       return null;
     }
     const user = await User.findById(payload.userId).select("_id name email role +tokenVersion");
