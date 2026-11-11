@@ -16,6 +16,8 @@ __pycache__/
 .venv/
 venv/
 .pytest_cache/
+ml-service/saved_models/*
+!ml-service/saved_models/.gitkeep
 
 # Local data and generated output
 datasets/raw/*
