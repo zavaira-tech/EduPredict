@@ -90,7 +90,9 @@ export function ModelMetricsCard({ title, status, metrics }) {
 
 export function ModelComparisonTable({ model }) {
   const candidates = model?.active?.candidates || [];
-  const metricNames = candidates.length ? Object.keys(candidates[0].metrics || {}) : [];
+  const metricNames = candidates.length
+    ? Object.keys(candidates[0].metrics || {}).filter((metric) => typeof candidates[0].metrics[metric] === "number")
+    : [];
   if (!model || model.status !== "trained") {
     return (
       <Typography color="text.secondary">
@@ -199,6 +201,15 @@ export function PredictionHistoryTable({ predictions, role }) {
                     {item.riskLevel && <RiskBadge level={item.riskLevel} />}
                     {typeof item.predictedValue === "number" ? item.predictedValue.toFixed(1) : item.predictedValue || item.prediction}
                     {item.predictedGrade ? ` · ${item.predictedGrade}` : ""}
+                    {item.predictionType === "performance" && Number.isFinite(item.details?.expectedGpa)
+                      ? ` · GPA ${item.details.expectedGpa.toFixed(2)}`
+                      : ""}
+                    {item.predictionType === "dropout" && Number.isFinite(item.probability)
+                      ? ` · ${(item.probability * 100).toFixed(1)}%`
+                      : ""}
+                    {item.predictionType === "courseDemand" && item.details?.demandCategory
+                      ? ` · ${item.details.demandCategory} · ${item.details.expectedDemandTrend || "—"}`
+                      : ""}
                   </TableCell>
                   <TableCell>{item.modelName ? `${item.modelName} ${item.modelVersion || ""}` : "—"}</TableCell>
                 </TableRow>
@@ -214,7 +225,7 @@ export function PredictionHistoryTable({ predictions, role }) {
                                 .map(([name, value]) => `${name.replace(/[A-Z]/g, (letter) => ` ${letter}`).trim()}: ${value ?? "Not available"}`)
                                 .join(" · ")}
                             </Typography>
-                          </Fragment>
+                          </>
                         )}
                         {item.explanation?.length > 0 && (
                           <>
@@ -237,7 +248,7 @@ export function PredictionHistoryTable({ predictions, role }) {
                     </Collapse>
                   </TableCell>
                 </TableRow>
-              </>
+              </Fragment>
             ))}
           </TableBody>
         </Table>
@@ -343,6 +354,9 @@ export function FeatureImportanceChart({ features }) {
 }
 
 export function ModelTrainingHistory({ evaluation }) {
+  if (!evaluation) {
+    return <Typography color="text.secondary">Training history is unavailable.</Typography>;
+  }
   const records = Object.values(evaluation || {}).flatMap((model) =>
     (model.history || []).map((item) => ({ ...item })),
   ).sort((left, right) => new Date(right.trainedAt) - new Date(left.trainedAt));
@@ -388,6 +402,19 @@ function ChartPanel({ title, children }) {
 
 function modelData(evaluation, key) {
   return evaluation?.[key] || { status: evaluation ? "not-trained" : "unavailable", active: null, history: [] };
+}
+
+function ConfusionMatrix({ matrix }) {
+  if (!Array.isArray(matrix) || matrix.length !== 2) return null;
+  return (
+    <Table size="small" sx={{ maxWidth: 360, mt: 1 }}>
+      <TableHead><TableRow><TableCell>Actual / predicted</TableCell><TableCell>Retained</TableCell><TableCell>Dropped</TableCell></TableRow></TableHead>
+      <TableBody>
+        <TableRow><TableCell>Retained</TableCell><TableCell>{matrix[0]?.[0] ?? "—"}</TableCell><TableCell>{matrix[0]?.[1] ?? "—"}</TableCell></TableRow>
+        <TableRow><TableCell>Dropped</TableCell><TableCell>{matrix[1]?.[0] ?? "—"}</TableCell><TableCell>{matrix[1]?.[1] ?? "—"}</TableCell></TableRow>
+      </TableBody>
+    </Table>
+  );
 }
 
 export default function PredictiveAnalyticsDashboard({ user }) {
@@ -538,6 +565,9 @@ export default function PredictiveAnalyticsDashboard({ user }) {
       <Alert severity="info">
         Predictions support academic guidance; they are estimates, not certainties or causal explanations. No student is automatically penalized based on a model output.
       </Alert>
+      <Alert severity="warning">
+        Dropout-risk training currently uses dropped course enrollments as a proxy, not verified university departures. Expected GPA uses a simple 4.0-scale estimate and should be validated against institutional grading rules.
+      </Alert>
 
       {canGenerate && (
         <Paper className="analytics-filters" elevation={0}>
@@ -609,6 +639,15 @@ export default function PredictiveAnalyticsDashboard({ user }) {
               metrics={demandModel.active?.metrics}
             />
           </div>
+          <ChartPanel title="Dropout confusion matrix">
+            {dropoutModel.status === "trained"
+              ? <ConfusionMatrix matrix={dropoutModel.active?.metrics?.confusionMatrix} />
+              : <Typography color="text.secondary">
+                {dropoutModel.status === "unavailable"
+                  ? "Confusion matrix is unavailable."
+                  : "Not Trained — no confusion matrix is available."}
+              </Typography>}
+          </ChartPanel>
         </>
       )}
 

@@ -21,6 +21,17 @@ function serviceConfiguration() {
     error.status = 503;
     throw error;
   }
+  const loopbackHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+  if (url.protocol === "http:" && !loopbackHosts.has(url.hostname)) {
+    const error = new Error("The machine-learning service must use HTTPS outside the local machine.");
+    error.status = 503;
+    throw error;
+  }
+  if (url.username || url.password) {
+    const error = new Error("Credentials must not be embedded in the machine-learning service URL.");
+    error.status = 503;
+    throw error;
+  }
   return { baseUrl: url.toString().replace(/\/$/, ""), apiKey };
 }
 

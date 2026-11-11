@@ -73,6 +73,27 @@ DEMAND_NUMERIC = [
     "coursePopularity",
 ]
 DEMAND_CATEGORICAL = ["department"]
+FEATURE_RANGES: dict[str, dict[str, tuple[float, float]]] = {
+    "performance": {
+        "previousGpa": (0, 4),
+        "attendancePercentage": (0, 100),
+        "assignmentAverage": (0, 100),
+        "quizAverage": (0, 100),
+        "midtermScore": (0, 100),
+        "previousSemesterPerformance": (0, 100),
+        "courseEnrollment": (0, 100000),
+        "semester": (1, 20),
+    },
+    "dropout": {
+        "attendancePercentage": (0, 100),
+        "gpa": (0, 4),
+        "failedCourses": (0, 1000),
+        "previousPerformance": (0, 100),
+        "semesterProgression": (1, 20),
+        "enrollmentHistory": (0, 1000),
+        "courseCompletionHistory": (0, 100),
+    },
+}
 
 TRAINING_CONFIG: dict[str, dict[str, Any]] = {
     "performance": {
@@ -211,11 +232,16 @@ def _validate_records(
     for column in config["numeric"] + [target]:
         data[column] = pd.to_numeric(data[column], errors="coerce")
         data.loc[~np.isfinite(data[column]), column] = np.nan
+    valid_rows = data[target].between(0, 100)
+    for column, (minimum, maximum) in FEATURE_RANGES[model_type].items():
+        valid_rows &= data[column].isna() | data[column].between(minimum, maximum)
+    data = data.loc[valid_rows]
     data = data.dropna(subset=[target])
     for column in config["categorical"]:
         data[column] = data[column].apply(
-            lambda value: str(value).strip()[:100] if pd.notna(value) and str(value).strip() else np.nan
+            lambda value: value.strip() if isinstance(value, str) and value.strip() else np.nan
         )
+        data = data.loc[data[column].isna() | data[column].str.len().le(100)]
     data = data.dropna(subset=config["numeric"] + config["categorical"], how="all")
     if len(data) < config["minimumRows"]:
         raise TrainingError(
@@ -266,8 +292,10 @@ def _demand_training_rows(records: list[dict[str, Any]]) -> tuple[pd.DataFrame, 
         if (
             not isinstance(course, str)
             or not course.strip()
+            or len(course.strip()) > 100
             or not isinstance(year, str)
             or not year.strip()
+            or len(year.strip()) > 20
             or isinstance(semester, bool)
             or not isinstance(semester, (int, float))
             or not float(semester).is_integer()
@@ -275,10 +303,20 @@ def _demand_training_rows(records: list[dict[str, Any]]) -> tuple[pd.DataFrame, 
             or isinstance(count, bool)
             or not isinstance(count, (int, float))
             or not math.isfinite(float(count))
-            or count < 0
+            or not 0 <= count <= 100_000
+        ):
+            continue
+        completion_rate = record.get("courseCompletionRate")
+        if completion_rate is not None and (
+            isinstance(completion_rate, bool)
+            or not isinstance(completion_rate, (int, float))
+            or not math.isfinite(float(completion_rate))
+            or not 0 <= completion_rate <= 100
         ):
             continue
         key = (course.strip()[:100], year.strip()[:20], int(semester))
+        if not 19_000 <= _period_sort_key({"academicYear": key[1], "semester": key[2]})[0] <= 220_000:
+            continue
         if key in grouped:
             raise TrainingError("Historical demand input contains duplicate course-period totals.")
         grouped[key] = {
@@ -339,7 +377,7 @@ def _demand_training_rows(records: list[dict[str, Any]]) -> tuple[pd.DataFrame, 
         data[column] = pd.to_numeric(data[column], errors="coerce")
         data.loc[~np.isfinite(data[column]), column] = np.nan
     data["department"] = data["department"].apply(
-        lambda value: str(value).strip()[:100] if pd.notna(value) and str(value).strip() else np.nan
+        lambda value: value.strip() if isinstance(value, str) and value.strip() and len(value.strip()) <= 100 else np.nan
     )
     data = data.dropna(subset=["enrollment"])
     return data[feature_columns], data["enrollment"], data

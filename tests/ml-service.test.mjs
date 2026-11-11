@@ -39,3 +39,18 @@ test("ML service rejects unsupported protocols", async () => {
     else process.env.ML_SERVICE_API_KEY = previousKey;
   }
 });
+
+test("ML service requires HTTPS for non-loopback hosts", async () => {
+  const previousUrl = process.env.ML_SERVICE_URL;
+  const previousKey = process.env.ML_SERVICE_API_KEY;
+  process.env.ML_SERVICE_URL = "http://ml.internal:8001";
+  process.env.ML_SERVICE_API_KEY = "x".repeat(32);
+  try {
+    await assert.rejects(callMlService("/api/ml/models"), (error) => error.status === 503);
+  } finally {
+    if (previousUrl === undefined) delete process.env.ML_SERVICE_URL;
+    else process.env.ML_SERVICE_URL = previousUrl;
+    if (previousKey === undefined) delete process.env.ML_SERVICE_API_KEY;
+    else process.env.ML_SERVICE_API_KEY = previousKey;
+  }
+});

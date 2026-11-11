@@ -4,7 +4,8 @@ This FastAPI service trains and serves performance, dropout-risk, and course-dem
 
 ## Windows setup (PowerShell)
 
-Use Python 3.11–3.13 for the supported scikit-learn runtime.
+Use Python 3.12 for a conservative Windows setup; the current service was also
+validated with the available Python 3.15 runtime.
 
 ```powershell
 cd ml-service
@@ -64,6 +65,13 @@ seed is fixed for reproducibility. Predictions are estimates, not causal
 explanations or decisions; academic support suggestions are non-punitive.
 Synthetic examples are used only in automated tests and are never used by the
 application for training.
+
+The current data schema labels a dropped **course enrollment**, not a verified
+student departure from the university. Until an institution-level withdrawal
+outcome is available, the dropout model is a course-withdrawal risk proxy and
+must not be interpreted as a finding that a student will leave. Expected GPA is
+a simple score-to-4.0 estimate (`score / 25`); institutions should replace or
+validate that mapping against their official grading scale.
 
 ## API
 

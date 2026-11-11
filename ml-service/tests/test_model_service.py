@@ -70,11 +70,20 @@ class ModelServiceTests(unittest.TestCase):
         self.assertEqual(len(features), 40)
         self.assertEqual(len(target), 40)
 
+    def test_preprocessing_discards_out_of_range_records(self) -> None:
+        records = performance_records()
+        records[0]["finalScore"] = 120
+        records[1]["attendancePercentage"] = 105
+        features, target, _ = _validate_records("performance", records)
+        self.assertEqual(len(features), 38)
+        self.assertEqual(len(target), 38)
+
     def test_performance_model_trains_persists_and_predicts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             registry = ModelRegistry(Path(directory))
             trained = registry.train("performance", performance_records())
             self.assertIn("rmse", trained["metrics"])
+            self.assertTrue(trained["featureImportance"])
             prediction = registry.predict("performance", performance_records()[-1])
             self.assertGreaterEqual(prediction["predictedFinalScore"], 0)
             self.assertLessEqual(prediction["predictedFinalScore"], 100)

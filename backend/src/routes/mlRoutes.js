@@ -8,7 +8,6 @@ import {
   predict,
   trainModel,
 } from "../controllers/mlController.js";
-import asyncHandler from "../middleware/asyncHandler.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
 
 const router = Router();

@@ -161,6 +161,10 @@ incomplete/censored outcomes, and the service rejects insufficient or
 single-period datasets. Evaluation reports `Not Trained` until actual training
 succeeds. The exact data requirements, preprocessing, Windows instructions,
 and synthetic-only test fixtures are in [ml-service/README.md](../ml-service/README.md).
+The current enrollment schema represents a course withdrawal (`status: dropped`),
+not a verified departure from the university, so dropout-risk outputs are only
+course-withdrawal estimates. Expected GPA is a simple `score / 25` estimate and
+must be checked against the institution's grading scale.
 
 ## Tests
 
