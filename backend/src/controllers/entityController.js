@@ -33,7 +33,12 @@ async function scopedFilter(req, modelName) {
     const studentId = profile?._id;
     if (modelName === "students") return studentId ? { _id: studentId } : { _id: null };
     if (modelName === "courses") return studentId ? { enrolledStudents: studentId } : { _id: null };
-    if (["attendance", "performance", "predictions", "alerts"].includes(modelName)) {
+    if (modelName === "predictions") {
+      return studentId
+        ? { student: studentId, predictionType: { $ne: "courseDemand" } }
+        : { _id: null };
+    }
+    if (["attendance", "performance", "alerts"].includes(modelName)) {
       return studentId ? { student: studentId } : { _id: null };
     }
     if (modelName === "support") return { user: user._id };

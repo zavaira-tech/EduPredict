@@ -14,6 +14,7 @@ import joblib
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.ensemble import (
     GradientBoostingClassifier,
     GradientBoostingRegressor,
@@ -35,7 +36,6 @@ from sklearn.metrics import (
 )
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
-from sklearn.utils import assert_all_finite
 
 LOGGER = logging.getLogger("edupredict.ml")
 RANDOM_STATE = 42
@@ -102,15 +102,33 @@ class TrainingError(ValueError):
     """A validation or minimum-data error that is safe to show to API clients."""
 
 
+class IqrCapper(BaseEstimator, TransformerMixin):
+    def fit(self, values: pd.DataFrame, y: Any = None) -> "IqrCapper":
+        frame = pd.DataFrame(values)
+        first = frame.quantile(0.25)
+        third = frame.quantile(0.75)
+        spread = third - first
+        self.lower_ = first - 1.5 * spread
+        self.upper_ = third + 1.5 * spread
+        return self
+
+    def transform(self, values: pd.DataFrame) -> pd.DataFrame:
+        frame = pd.DataFrame(values).copy()
+        return frame.clip(self.lower_, self.upper_, axis="columns")
+
+
 def _pipeline(
     numeric_features: list[str], categorical_features: list[str], estimator: Any, scale: bool
 ) -> Pipeline:
-    numeric_steps: list[tuple[str, Any]] = [("imputer", SimpleImputer(strategy="median"))]
+    numeric_steps: list[tuple[str, Any]] = [
+        ("imputer", SimpleImputer(strategy="median", keep_empty_features=True)),
+        ("outlier_capper", IqrCapper()),
+    ]
     if scale:
         numeric_steps.append(("scaler", StandardScaler()))
     categorical = Pipeline(
         [
-            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("imputer", SimpleImputer(strategy="most_frequent", keep_empty_features=True)),
             ("encoder", OneHotEncoder(handle_unknown="ignore")),
         ]
     )
@@ -184,7 +202,11 @@ def _validate_records(
     if missing_features:
         raise TrainingError(f"Training records are missing required features: {', '.join(missing_features)}.")
 
-    data = data[required_features + [target]].drop_duplicates()
+    if model_type not in {"performance", "dropout"} or "snapshotDate" not in data:
+        raise TrainingError("Training records must include their historical prediction-date snapshot.")
+    data = data[required_features + [target, "snapshotDate"]].drop_duplicates()
+    data["_snapshot"] = pd.to_datetime(data["snapshotDate"], errors="coerce", utc=True)
+    data = data.dropna(subset=["_snapshot"])
     for column in config["numeric"] + [target]:
         data[column] = pd.to_numeric(data[column], errors="coerce")
         data.loc[~np.isfinite(data[column]), column] = np.nan
@@ -213,7 +235,10 @@ def _validate_records(
         counts = target_values.value_counts()
         if len(counts) != 2 or int(counts.min()) < 8:
             raise TrainingError("At least 8 completed and 8 dropped enrollment records are required.")
-    return features, target_values, config
+    data = data.reset_index(drop=True)
+    features = data[required_features]
+    target_values = data[target].reset_index(drop=True)
+    return features, target_values, {**config, "snapshots": data["_snapshot"]}
 
 
 def _period_sort_key(record: dict[str, Any]) -> tuple[int, int]:
@@ -380,21 +405,28 @@ class ModelRegistry:
                 y_train, y_test = target.iloc[train_indices], target.iloc[test_indices]
             else:
                 features, target, config = _validate_records(model_type, records)
-                if config["kind"] == "classification":
-                    from sklearn.model_selection import train_test_split
-
-                    x_train, x_test, y_train, y_test = train_test_split(
-                        features,
-                        target,
-                        test_size=0.25,
-                        random_state=SEED,
-                        stratify=target,
+                snapshots = config["snapshots"]
+                unique_snapshots = sorted(snapshots.unique())
+                if len(unique_snapshots) < 2:
+                    raise TrainingError(
+                        "At least two distinct historical snapshot dates are required for leakage-safe evaluation."
                     )
-                else:
-                    from sklearn.model_selection import train_test_split
-
-                    x_train, x_test, y_train, y_test = train_test_split(
-                        features, target, test_size=0.2, random_state=SEED
+                test_dates = max(1, math.ceil(len(unique_snapshots) * 0.2))
+                holdout = set(unique_snapshots[-test_dates:])
+                test_mask = snapshots.isin(holdout)
+                train_indices = np.flatnonzero((~test_mask).to_numpy())
+                test_indices = np.flatnonzero(test_mask.to_numpy())
+                if len(train_indices) < 8 or not len(test_indices):
+                    raise TrainingError(
+                        "There is not enough historical data for a chronological train/test split."
+                    )
+                x_train, x_test = features.iloc[train_indices], features.iloc[test_indices]
+                y_train, y_test = target.iloc[train_indices], target.iloc[test_indices]
+                if config["kind"] == "classification" and (
+                    y_train.nunique() != 2 or y_test.nunique() != 2
+                ):
+                    raise TrainingError(
+                        "Both completed and dropped outcomes must be represented in the chronological holdout."
                     )
 
             candidate_results: list[dict[str, Any]] = []
@@ -408,7 +440,11 @@ class ModelRegistry:
                         "mae": float(mean_absolute_error(y_test, predictions)),
                         "mse": mse,
                         "rmse": float(math.sqrt(mse)),
-                        "r2": float(r2_score(y_test, predictions)) if len(y_test) > 1 else None,
+                        "r2": (
+                            float(r2_score(y_test, predictions))
+                            if len(y_test) > 1 and y_test.nunique() > 1
+                            else None
+                        ),
                     }
                     score = metrics["rmse"]
                 else:
@@ -467,7 +503,7 @@ class ModelRegistry:
                 "dataSplit": (
                     "Chronological holdout using the latest academic periods."
                     if model_type == "course-demand"
-                    else "Reproducible random holdout (seed 42), stratified for classification."
+                    else "Chronological holdout using the latest historical snapshot dates."
                 ),
             }
             try:

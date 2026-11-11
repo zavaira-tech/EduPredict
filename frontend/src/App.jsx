@@ -20,6 +20,7 @@ import api from "./services/api.js";
 const LiveDashboard = lazy(() => import("./components/dashboard/LiveDashboard.jsx"));
 const AnalyticsDashboard = lazy(() => import("./components/dashboard/AnalyticsDashboard.jsx"));
 const AnomalyDashboard = lazy(() => import("./components/dashboard/AnomalyDashboard.jsx"));
+const PredictiveAnalyticsDashboard = lazy(() => import("./components/dashboard/PredictiveAnalyticsDashboard.jsx"));
 
 const resourceRoutes = [
   "users", "students", "teachers", "courses", "enrollments", "attendance", "performance",
@@ -170,6 +171,9 @@ function AppContent({ darkMode, onToggleTheme }) {
           ))}
           <Route path="/analytics" element={["admin", "analyst", "teacher", "student"].includes(user.role)
             ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AnalyticsDashboard user={user} /></Suspense>
+            : <AccessDenied />} />
+          <Route path="/ml" element={["admin", "analyst", "teacher", "student"].includes(user.role)
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><PredictiveAnalyticsDashboard user={user} /></Suspense>
             : <AccessDenied />} />
           <Route path="/anomalies" element={["admin", "analyst"].includes(user.role)
             ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AnomalyDashboard /></Suspense>

@@ -20,6 +20,7 @@ import {
 import {
   Activity,
   BarChart3,
+  BrainCircuit,
   Bell,
   BookOpen,
   ChevronDown,
@@ -60,6 +61,7 @@ const navigation = [
     label: "INSIGHTS",
     items: [
       { title: "Predictions", path: "/predictions", icon: BarChart3, badge: "NEW" },
+      { title: "Predictive analytics", path: "/ml", icon: BrainCircuit, roles: ["admin", "analyst", "teacher", "student"] },
       { title: "Anomaly detection", path: "/anomalies", icon: ShieldAlert, roles: ["admin", "analyst"] },
       { title: "Analytics & reports", path: "/analytics", icon: FileChartColumn, roles: ["admin", "analyst", "teacher", "student"] },
       { title: "Datasets", path: "/datasets", icon: Database, roles: ["admin", "analyst"] },

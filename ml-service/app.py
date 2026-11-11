@@ -6,7 +6,7 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from services.model_service import ModelRegistry, TrainingError, registry
+from services.model_service import TrainingError, registry
 
 API_KEY = os.getenv("ML_SERVICE_API_KEY")
 if not API_KEY or len(API_KEY) < 32:
@@ -40,6 +40,8 @@ def health() -> dict[str, str]:
 
 @app.post("/api/ml/train/{model_type}", dependencies=[Depends(require_api_key)])
 def train_model(model_type: str, request: TrainingRequest) -> dict[str, Any]:
+    if model_type not in {"performance", "dropout", "course-demand"}:
+        raise HTTPException(status_code=404, detail="Unknown model type.")
     try:
         result = registry.train(model_type, request.records)
         logging.getLogger("edupredict.ml").info(
@@ -54,6 +56,8 @@ def train_model(model_type: str, request: TrainingRequest) -> dict[str, Any]:
 
 @app.post("/api/ml/predict/{model_type}", dependencies=[Depends(require_api_key)])
 def predict(model_type: str, request: PredictionRequest) -> dict[str, Any]:
+    if model_type not in {"performance", "dropout", "course-demand"}:
+        raise HTTPException(status_code=404, detail="Unknown model type.")
     try:
         return {"success": True, "data": registry.predict(model_type, request.features)}
     except TrainingError as error:
@@ -83,6 +87,3 @@ def model_detail(model_id: str) -> dict[str, Any]:
 def evaluation() -> dict[str, Any]:
     return {"success": True, "data": registry.evaluation()}
 
-
-def create_registry(model_dir: str) -> ModelRegistry:
-    return ModelRegistry(model_dir)

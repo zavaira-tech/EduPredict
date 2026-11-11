@@ -54,6 +54,7 @@ function requireFeatures(modelType, value) {
   }
   for (const [field, [minimum, maximum]] of Object.entries(ranges[modelType])) {
     const item = value[field];
+    if (item === null || item === undefined) continue;
     if (
       typeof item !== "number" ||
       !Number.isFinite(item) ||
@@ -72,7 +73,7 @@ function requireFeatures(modelType, value) {
       throw badRequest(`Feature '${field}' must be a non-empty string of at most 100 characters.`);
     }
   }
-  return Object.fromEntries([...allowed].map((field) => [field, value[field]]));
+  return Object.fromEntries([...allowed].map((field) => [field, value[field] ?? null]));
 }
 
 async function assertStudentScope(user, studentId, courseId = null) {
@@ -145,10 +146,13 @@ async function assertCourseScope(user, courseId) {
       error.status = 403;
       throw error;
     }
-  } else if (user.role === "student" && !(await Enrollment.exists({ course: course._id, student: await Student.findOne({ user: user._id }).select("_id") }))) {
-    const error = new Error("You can only forecast demand for a course in your enrollment history.");
-    error.status = 403;
-    throw error;
+  } else if (user.role === "student") {
+    const student = await Student.findOne({ user: user._id }).select("_id");
+    if (!student || !(await Enrollment.exists({ course: course._id, student: student._id }))) {
+      const error = new Error("You can only forecast demand for a course in your enrollment history.");
+      error.status = 403;
+      throw error;
+    }
   }
 }
 
@@ -171,12 +175,170 @@ function average(records, field) {
   return values.length ? values.reduce((total, value) => total + value, 0) / values.length : null;
 }
 
+function getYear(academicYear) {
+  const match = String(academicYear || "").match(/(?:19|20)\d{2}/);
+  return match ? Number(match[0]) : null;
+}
+
+async function buildPredictionFeatures(modelType, studentId, courseId) {
+  if (modelType === "performance") {
+    const [student, course, enrollment, attendances, previousRecords, courseEnrollments] =
+      await Promise.all([
+        Student.findById(studentId).select("gpa attendancePercentage"),
+        Course.findById(courseId).select("department semester"),
+        Enrollment.findOne({ student: studentId, course: courseId, status: "active" })
+          .sort({ createdAt: -1 })
+          .select("academicYear semester"),
+        Attendance.find({ student: studentId })
+          .select("status percentage createdAt")
+          .sort({ createdAt: 1 })
+          .limit(MAX_TRAINING_RECORDS)
+          .lean(),
+        Performance.find({ student: studentId, finalScore: { $gt: 0 } })
+          .select("gpa finalScore createdAt")
+          .sort({ createdAt: -1 })
+          .limit(1000)
+          .lean(),
+        Enrollment.countDocuments({ course: courseId, status: "active" }),
+      ]);
+    if (!student || !course) {
+      const error = new Error("Student or course not found.");
+      error.status = 404;
+      throw error;
+    }
+    if (!enrollment) {
+      const error = new Error("Performance prediction requires an active enrollment in the selected course.");
+      error.status = 409;
+      throw error;
+    }
+    const currentPerformance = await Performance.findOne({
+      student: studentId,
+      course: courseId,
+      ...(enrollment.academicYear ? { academicYear: enrollment.academicYear } : {}),
+      ...(enrollment.semester ? { semester: enrollment.semester } : {}),
+    })
+      .sort({ createdAt: -1 })
+      .select("assignmentScore quizScore midtermScore");
+    if (!currentPerformance) {
+      const error = new Error("No current assignment, quiz, or midterm record is available for this course.");
+      error.status = 422;
+      throw error;
+    }
+    return {
+      previousGpa: Number.isFinite(student.gpa) ? student.gpa : null,
+      attendancePercentage: Number.isFinite(student.attendancePercentage)
+        ? student.attendancePercentage
+        : attendanceSummary(attendances, new Date()),
+      assignmentAverage: currentPerformance.assignmentScore,
+      quizAverage: currentPerformance.quizScore,
+      midtermScore: currentPerformance.midtermScore,
+      previousSemesterPerformance: average(previousRecords, "finalScore"),
+      courseEnrollment: courseEnrollments,
+      department: course.department,
+      semester: enrollment.semester || course.semester,
+    };
+  }
+
+  if (modelType === "dropout") {
+    const [student, enrollments, performances, attendances] = await Promise.all([
+      Student.findById(studentId).select("department semester gpa attendancePercentage"),
+      Enrollment.find({ student: studentId })
+        .select("status createdAt")
+        .sort({ createdAt: 1 })
+        .lean(),
+      Performance.find({ student: studentId, finalScore: { $gt: 0 } })
+        .select("gpa totalScore finalScore")
+        .sort({ createdAt: 1 })
+        .limit(1000)
+        .lean(),
+      Attendance.find({ student: studentId })
+        .select("status percentage createdAt")
+        .sort({ createdAt: 1 })
+        .limit(MAX_TRAINING_RECORDS)
+        .lean(),
+    ]);
+    if (!student) {
+      const error = new Error("Student not found.");
+      error.status = 404;
+      throw error;
+    }
+    const completedEnrollments = enrollments.filter((item) => item.status === "completed").length;
+    return {
+      attendancePercentage: Number.isFinite(student.attendancePercentage)
+        ? student.attendancePercentage
+        : attendanceSummary(attendances, new Date()),
+      gpa: Number.isFinite(student.gpa) ? student.gpa : null,
+      failedCourses: performances.filter(
+        (item) => (Number.isFinite(item.gpa) && item.gpa < 2) ||
+          (Number.isFinite(item.totalScore) && item.totalScore < 60),
+      ).length,
+      previousPerformance: average(performances, "finalScore"),
+      semesterProgression: student.semester,
+      enrollmentHistory: enrollments.length,
+      courseCompletionHistory: enrollments.length
+        ? completedEnrollments / enrollments.length * 100
+        : null,
+      department: student.department,
+    };
+  }
+
+  const course = await Course.findById(courseId).select("_id courseCode department semester");
+  if (!course) {
+    const error = new Error("Course not found.");
+    error.status = 404;
+    throw error;
+  }
+  const enrollments = await Enrollment.find({ course: courseId })
+    .select("academicYear semester status")
+    .sort({ createdAt: 1 })
+    .lean();
+  const periods = new Map();
+  for (const record of enrollments) {
+    if (!record.academicYear || !record.semester) continue;
+    const key = `${record.academicYear}|${record.semester}`;
+    const count = periods.get(key) || {
+      academicYear: record.academicYear,
+      semester: record.semester,
+      enrollment: 0,
+      completed: 0,
+    };
+    count.enrollment += 1;
+    if (record.status === "completed") count.completed += 1;
+    periods.set(key, count);
+  }
+  const orderedPeriods = [...periods.values()].sort((left, right) => {
+    const leftYear = getYear(left.academicYear) || 0;
+    const rightYear = getYear(right.academicYear) || 0;
+    return leftYear - rightYear || left.semester - right.semester;
+  });
+  if (!orderedPeriods.length) {
+    const error = new Error("Course-demand prediction requires at least one historical enrollment period.");
+    error.status = 422;
+    throw error;
+  }
+  const latest = orderedPeriods[orderedPeriods.length - 1];
+  const previous = orderedPeriods[orderedPeriods.length - 2] || latest;
+  const latestYear = getYear(latest.academicYear);
+  return {
+    semester: course.semester,
+    academicYearIndex: (latestYear || new Date().getUTCFullYear()) * 10 + course.semester,
+    previousEnrollment: latest.enrollment,
+    priorPreviousEnrollment: previous.enrollment,
+    demandTrend: latest.enrollment - previous.enrollment,
+    courseCompletionRate: latest.enrollment
+      ? latest.completed / latest.enrollment * 100
+      : null,
+    coursePopularity: latest.enrollment,
+    department: course.department,
+  };
+}
+
 async function loadPerformanceTrainingRecords() {
   const [performances, attendances, enrollments] = await Promise.all([
-    Performance.find({ finalScore: { $gt: 0 } })
-      .select("student course assignmentScore quizScore midtermScore finalScore semester academicYear createdAt")
+    Performance.find()
+      .select("student course assignmentScore quizScore midtermScore finalScore gpa semester academicYear createdAt")
       .populate("student", "department")
-      .populate("course", "department")
+      .populate("course", "courseCode department")
       .sort({ createdAt: 1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
@@ -186,12 +348,24 @@ async function loadPerformanceTrainingRecords() {
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
     Enrollment.find()
-      .select("student course academicYear semester createdAt")
+      .select("student course academicYear semester status createdAt")
       .populate("course", "courseCode")
       .sort({ createdAt: 1 })
       .limit(MAX_TRAINING_RECORDS)
       .lean(),
   ]);
+  const completedPeriods = new Set(
+    enrollments
+      .filter((record) => record.status === "completed" && record.academicYear && record.semester)
+      .map((record) => `${record.student}|${record.course?.courseCode || ""}|${record.academicYear}|${record.semester}`),
+  );
+  const completedPerformances = performances.filter((record) =>
+    record.academicYear &&
+    record.semester &&
+    completedPeriods.has(
+      `${record.student?._id || record.student}|${record.course?.courseCode || ""}|${record.academicYear}|${record.semester}`,
+    ),
+  );
   const attendanceByStudent = new Map();
   for (const record of attendances) {
     const key = String(record.student);
@@ -199,7 +373,7 @@ async function loadPerformanceTrainingRecords() {
     attendanceByStudent.get(key).push(record);
   }
   const performanceByStudent = new Map();
-  for (const record of performances) {
+  for (const record of completedPerformances) {
     const key = String(record.student?._id || record.student);
     if (!performanceByStudent.has(key)) performanceByStudent.set(key, []);
     performanceByStudent.get(key).push(record);
@@ -211,7 +385,7 @@ async function loadPerformanceTrainingRecords() {
     enrollmentByPeriod.get(key).push(record);
   }
 
-  return performances.map((record) => {
+  return completedPerformances.map((record) => {
     const timestamp = record.createdAt || new Date(0);
     const studentKey = String(record.student?._id || record.student);
     const priorPerformance = (performanceByStudent.get(studentKey) || []).filter(
@@ -231,6 +405,7 @@ async function loadPerformanceTrainingRecords() {
       courseEnrollment,
       department: record.course?.department || record.student?.department || null,
       semester: record.semester || null,
+      snapshotDate: timestamp.toISOString(),
       finalScore: record.finalScore,
     };
   });
@@ -239,7 +414,7 @@ async function loadPerformanceTrainingRecords() {
 async function loadDropoutTrainingRecords() {
   const [enrollments, performances, attendances, students] = await Promise.all([
     Enrollment.find({ status: { $in: ["completed", "dropped"] } })
-      .select("student course status semester createdAt")
+      .select("student course status semester enrolledAt createdAt")
       .populate("course", "department")
       .sort({ createdAt: 1 })
       .limit(MAX_TRAINING_RECORDS)
@@ -278,9 +453,9 @@ async function loadDropoutTrainingRecords() {
 
   return enrollments.map((record) => {
     const studentKey = String(record.student);
-    const timestamp = record.createdAt || new Date(0);
+    const timestamp = record.enrolledAt || record.createdAt || new Date(0);
     const priorEnrollments = (enrollmentByStudent.get(studentKey) || []).filter(
-      (item) => item.createdAt && item.createdAt < timestamp,
+      (item) => item.enrolledAt && item.enrolledAt < timestamp,
     );
     const priorPerformance = (performanceByStudent.get(studentKey) || []).filter(
       (item) => item.createdAt && item.createdAt < timestamp,
@@ -301,6 +476,7 @@ async function loadDropoutTrainingRecords() {
         ? completed / priorEnrollments.length * 100
         : null,
       department: record.course?.department || studentById.get(studentKey)?.department || null,
+      snapshotDate: timestamp.toISOString(),
       dropped: record.status === "dropped" ? 1 : 0,
     };
   });
@@ -308,7 +484,7 @@ async function loadDropoutTrainingRecords() {
 
 async function loadCourseDemandTrainingRecords() {
   const enrollments = await Enrollment.find()
-    .select("course academicYear semester")
+    .select("course academicYear semester status")
     .populate("course", "courseCode department")
     .limit(MAX_TRAINING_RECORDS)
     .lean();
@@ -322,11 +498,16 @@ async function loadCourseDemandTrainingRecords() {
       academicYear: record.academicYear,
       semester: record.semester,
       enrollment: 0,
+      completed: 0,
     };
     total.enrollment += 1;
+    if (record.status === "completed") total.completed += 1;
     totals.set(key, total);
   }
-  return [...totals.values()];
+  return [...totals.values()].map(({ completed, ...record }) => ({
+    ...record,
+    courseCompletionRate: record.enrollment ? completed / record.enrollment * 100 : null,
+  }));
 }
 
 async function loadTrainingRecords(modelType) {
@@ -351,7 +532,6 @@ export const trainModel = asyncHandler(async (req, res) => {
 export const predict = asyncHandler(async (req, res) => {
   const { modelType } = req.params;
   if (!isModelType(modelType)) throw badRequest("Unsupported model type.");
-  const features = requireFeatures(modelType, req.body?.features);
   let student = null;
   let course = null;
 
@@ -368,6 +548,10 @@ export const predict = asyncHandler(async (req, res) => {
     if (course && !(await Course.exists({ _id: course }))) throw badRequest("Course not found.");
   }
 
+  const features = requireFeatures(
+    modelType,
+    await buildPredictionFeatures(modelType, student, course),
+  );
   const predictionResult = await callMlService(`/api/ml/predict/${modelType}`, {
     method: "POST",
     body: { features },
@@ -420,7 +604,8 @@ export const listPredictionHistory = asyncHandler(async (req, res) => {
   const filter = {};
   if (req.user.role === "student") {
     const student = await Student.findOne({ user: req.user._id }).select("_id");
-    filter.student = student?._id || null;
+    filter.student = student?._id || { $in: [] };
+    filter.predictionType = { $ne: "courseDemand" };
   } else if (req.user.role === "teacher") {
     const teacher = await Teacher.findOne({ user: req.user._id }).select("_id courses");
     if (!teacher) {
@@ -454,4 +639,3 @@ export const listPredictionHistory = asyncHandler(async (req, res) => {
     .populate("course", "courseCode courseName department");
   res.json({ success: true, data: records });
 });
-
