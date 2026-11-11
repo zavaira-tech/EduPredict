@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -72,7 +72,11 @@ export function ModelMetricsCard({ title, status, metrics }) {
     <Paper className="analytics-panel" elevation={0}>
       <Typography className="panel-title">{title}</Typography>
       {status !== "trained" ? (
-        <Typography color="text.secondary" sx={{ mt: 1 }}>Not Trained — no evaluation metrics are available.</Typography>
+        <Typography color="text.secondary" sx={{ mt: 1 }}>
+          {status === "not-trained"
+            ? "Not Trained — no evaluation metrics are available."
+            : "Model evaluation is unavailable."}
+        </Typography>
       ) : (
         <div className="kpi-grid" style={{ marginTop: 16 }}>
           {entries.map(([key, value]) => (
@@ -88,7 +92,13 @@ export function ModelComparisonTable({ model }) {
   const candidates = model?.active?.candidates || [];
   const metricNames = candidates.length ? Object.keys(candidates[0].metrics || {}) : [];
   if (!model || model.status !== "trained") {
-    return <Typography color="text.secondary">Not Trained — candidate comparison will appear after a successful training run.</Typography>;
+    return (
+      <Typography color="text.secondary">
+        {model?.status === "unavailable"
+          ? "Model comparison is unavailable."
+          : "Not Trained — candidate comparison will appear after a successful training run."}
+      </Typography>
+    );
   }
   return (
     <Table size="small">
@@ -170,7 +180,7 @@ export function PredictionHistoryTable({ predictions, role }) {
           </TableHead>
           <TableBody>
             {visible.map((item) => (
-              <>
+              <Fragment key={item._id}>
                 <TableRow key={item._id}>
                   <TableCell>
                     <IconButton
@@ -204,7 +214,7 @@ export function PredictionHistoryTable({ predictions, role }) {
                                 .map(([name, value]) => `${name.replace(/[A-Z]/g, (letter) => ` ${letter}`).trim()}: ${value ?? "Not available"}`)
                                 .join(" · ")}
                             </Typography>
-                          </>
+                          </Fragment>
                         )}
                         {item.explanation?.length > 0 && (
                           <>
@@ -294,7 +304,9 @@ export function DropoutRiskChart({ predictions }) {
 export function CourseDemandChart({ predictions }) {
   const data = predictions.map((item, index) => ({
     forecast: `${index + 1}`,
-    enrollment: item.predictedValue,
+    previousPeriod: item.inputFeatures?.priorPreviousEnrollment,
+    latestHistorical: item.inputFeatures?.previousEnrollment,
+    predicted: item.predictedValue,
   }));
   return data.length ? (
     <ResponsiveContainer width="100%" height={260}>
@@ -303,7 +315,9 @@ export function CourseDemandChart({ predictions }) {
         <XAxis dataKey="forecast" />
         <YAxis />
         <Tooltip />
-        <Bar dataKey="enrollment" name="Predicted enrollment" fill="#14a991" />
+        <Bar dataKey="previousPeriod" name="Earlier historical enrollment" fill="#a9bbdc" />
+        <Bar dataKey="latestHistorical" name="Latest historical enrollment" fill="#356ae6" />
+        <Bar dataKey="predicted" name="Predicted enrollment" fill="#14a991" />
       </BarChart>
     </ResponsiveContainer>
   ) : <Typography color="text.secondary">No course-demand forecasts are available yet.</Typography>;
@@ -373,7 +387,7 @@ function ChartPanel({ title, children }) {
 }
 
 function modelData(evaluation, key) {
-  return evaluation?.[key] || { status: "not-trained", active: null, history: [] };
+  return evaluation?.[key] || { status: evaluation ? "not-trained" : "unavailable", active: null, history: [] };
 }
 
 export default function PredictiveAnalyticsDashboard({ user }) {
@@ -382,6 +396,7 @@ export default function PredictiveAnalyticsDashboard({ user }) {
   const canViewMetrics = ["admin", "analyst"].includes(user?.role);
   const [evaluation, setEvaluation] = useState(null);
   const [modelStatus, setModelStatus] = useState({});
+  const [modelStatusError, setModelStatusError] = useState("");
   const [predictions, setPredictions] = useState([]);
   const [students, setStudents] = useState([]);
   const [courses, setCourses] = useState([]);
@@ -396,6 +411,7 @@ export default function PredictiveAnalyticsDashboard({ user }) {
 
   const loadData = useCallback(async () => {
     setError("");
+    setModelStatusError("");
     const requests = [api.get("/ml/predictions"), api.get("/ml/status")];
     if (canViewMetrics) requests.push(api.get("/ml/evaluation"));
     if (canGenerate) {
@@ -411,14 +427,20 @@ export default function PredictiveAnalyticsDashboard({ user }) {
     }
     if (results[1].status === "fulfilled") {
       setModelStatus(Object.fromEntries((results[1].value.data.data || []).map((model) => [model.modelType, model])));
+      setModelStatusError("");
     } else {
-      setError((current) => current || results[1].reason.response?.data?.message || "Unable to load model status.");
+      const message = results[1].reason.response?.data?.message || "Unable to load model status.";
+      setModelStatusError(message);
+      setError((current) => current || message);
     }
     let resultIndex = 2;
     if (canViewMetrics) {
       const result = results[resultIndex++];
       if (result.status === "fulfilled") setEvaluation(result.value.data.data);
-      else setError((current) => current || result.reason.response?.data?.message || "Unable to load model evaluation.");
+      else {
+        setEvaluation(null);
+        setError((current) => current || result.reason.response?.data?.message || "Unable to load model evaluation.");
+      }
     }
     if (canGenerate) {
       const studentResult = results[resultIndex++];
@@ -488,10 +510,6 @@ export default function PredictiveAnalyticsDashboard({ user }) {
   const performanceStatus = modelStatus.performance;
   const dropoutStatus = modelStatus.dropout;
   const demandStatus = modelStatus["course-demand"];
-  const riskDistribution = ["Low Risk", "Medium Risk", "High Risk"].map((name) => ({
-    name,
-    value: predictions.filter((item) => item.predictionType === "dropout" && item.riskLevel === name).length,
-  })).filter((item) => item.value > 0);
   const performancePredictions = predictions.filter((item) =>
     item.predictionType === "performance" &&
     typeof item.predictedValue === "number" &&
@@ -567,9 +585,9 @@ export default function PredictiveAnalyticsDashboard({ user }) {
       )}
 
       <div className="kpi-grid">
-        <Metric label="Performance model" value={performanceStatus?.status === "trained" ? performanceStatus.algorithm || "Ready" : "Not Trained"} />
-        <Metric label="Dropout model" value={dropoutStatus?.status === "trained" ? dropoutStatus.algorithm || "Ready" : "Not Trained"} />
-        <Metric label="Course-demand model" value={demandStatus?.status === "trained" ? demandStatus.algorithm || "Ready" : "Not Trained"} />
+        <Metric label="Performance model" value={modelStatusError ? "Unavailable" : performanceStatus?.status === "trained" ? performanceStatus.algorithm || "Ready" : "Not Trained"} />
+        <Metric label="Dropout model" value={modelStatusError ? "Unavailable" : dropoutStatus?.status === "trained" ? dropoutStatus.algorithm || "Ready" : "Not Trained"} />
+        <Metric label="Course-demand model" value={modelStatusError ? "Unavailable" : demandStatus?.status === "trained" ? demandStatus.algorithm || "Ready" : "Not Trained"} />
       </div>
 
       {canViewMetrics && (
@@ -577,17 +595,17 @@ export default function PredictiveAnalyticsDashboard({ user }) {
           <div className="analytics-grid">
             <ModelMetricsCard
               title="Performance evaluation"
-              status={performanceModel.status}
+              status={evaluation ? performanceModel.status : "unavailable"}
               metrics={performanceModel.active?.metrics}
             />
             <ModelMetricsCard
               title="Dropout evaluation"
-              status={dropoutModel.status}
+              status={evaluation ? dropoutModel.status : "unavailable"}
               metrics={dropoutModel.active?.metrics}
             />
             <ModelMetricsCard
               title="Course-demand evaluation"
-              status={demandModel.status}
+              status={evaluation ? demandModel.status : "unavailable"}
               metrics={demandModel.active?.metrics}
             />
           </div>
@@ -621,65 +639,36 @@ export default function PredictiveAnalyticsDashboard({ user }) {
           ))}
         </div>
       )}
+      {canViewMetrics && (
+        <>
+          <div className="analytics-grid">
+            <ChartPanel title="Performance feature importance">
+              <FeatureImportanceChart features={performanceModel.active?.featureImportance} />
+            </ChartPanel>
+            <ChartPanel title="Dropout feature importance">
+              <FeatureImportanceChart features={dropoutModel.active?.featureImportance} />
+            </ChartPanel>
+            <ChartPanel title="Course-demand feature importance">
+              <FeatureImportanceChart features={demandModel.active?.featureImportance} />
+            </ChartPanel>
+          </div>
+          <ChartPanel title="Training history and model versions">
+            <ModelTrainingHistory evaluation={evaluation} />
+          </ChartPanel>
+        </>
+      )}
 
       <div className="analytics-grid">
         <ChartPanel title="Predicted versus historical performance">
-          {performancePredictions.length ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={[
-                ...eligiblePerformanceRecords
-                  .filter((record) => Number.isFinite(record.finalScore))
-                  .sort((left, right) => new Date(left.createdAt) - new Date(right.createdAt))
-                  .map((record, index) => ({
-                    assessment: `History ${index + 1}`,
-                    historical: record.finalScore,
-                  })),
-                ...performancePredictions.map((item, index) => ({
-                  assessment: `Prediction ${index + 1}`,
-                  predicted: item.predictedValue,
-                })),
-              ]}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="assessment" />
-                <YAxis domain={[0, 100]} />
-                <Tooltip />
-                <Legend />
-                <Line type="monotone" dataKey="predicted" name="Predicted final score" stroke="#356ae6" />
-                <Line type="monotone" dataKey="historical" name="Historical final score" stroke="#14a991" />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : <Typography color="text.secondary">No performance predictions are available yet.</Typography>}
+          <PerformancePredictionChart actualRecords={eligiblePerformanceRecords} predictions={performancePredictions} />
         </ChartPanel>
 
         <ChartPanel title="Dropout-risk distribution">
-          {riskDistribution.length ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <PieChart>
-                <Pie data={riskDistribution} dataKey="value" nameKey="name" outerRadius={85} label>
-                  {riskDistribution.map((item) => <Cell key={item.name} fill={riskColors[item.name]} />)}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : <Typography color="text.secondary">No dropout predictions are available yet.</Typography>}
+          <DropoutRiskChart predictions={predictions.filter((item) => item.predictionType === "dropout")} />
         </ChartPanel>
 
         <ChartPanel title="Course-demand forecasts">
-          {demandPredictions.length ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <BarChart data={demandPredictions.map((item, index) => ({
-                forecast: `${index + 1}`,
-                enrollment: item.predictedValue,
-              }))}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="forecast" />
-                <YAxis />
-                <Tooltip />
-                <Bar dataKey="enrollment" name="Predicted enrollment" fill="#14a991" />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : <Typography color="text.secondary">No course-demand forecasts are available yet.</Typography>}
+          <CourseDemandChart predictions={demandPredictions} />
         </ChartPanel>
       </div>
 
