@@ -56,11 +56,18 @@ function GuestRouteNotice() {
 
 function authRequestError(error, fallback) {
   if (error.response?.data?.message) return error.response.data.message;
+  if (error.response?.data?.error) return error.response.data.error;
+  if (typeof error.response?.data === "string" && error.response.data.trim() && !error.response.data.includes("<!DOCTYPE")) {
+    return error.response.data.trim();
+  }
   if (error.code === "ERR_NETWORK") {
     return `Cannot reach the EduPredict API at ${api.defaults.baseURL}. Start the backend and verify its port and frontend origin.`;
   }
   if (error.code === "ECONNABORTED") {
     return "The EduPredict API request timed out. Check that the backend and its configured services are responsive.";
+  }
+  if (error.response?.status) {
+    return `Server responded with HTTP ${error.response.status}${error.response.statusText ? ` (${error.response.statusText})` : ""}.`;
   }
   return error.message || fallback;
 }
@@ -72,8 +79,17 @@ function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", init
   const [notice, setNotice] = useState(initialNotice);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    setError(initialError);
+  }, [initialError]);
+
+  useEffect(() => {
+    setNotice(initialNotice);
+  }, [initialNotice]);
+
   const submit = async (event) => {
     event.preventDefault();
+    if (saving) return;
     setSaving(true);
     setError("");
     try {
@@ -88,6 +104,7 @@ function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", init
   };
 
   const continueAsGuest = async () => {
+    if (saving) return;
     setSaving(true);
     setError("");
     setNotice("");
