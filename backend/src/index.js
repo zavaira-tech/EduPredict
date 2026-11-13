@@ -7,6 +7,7 @@ import mongoose, { connectToDatabase } from "./config/db.js";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import healthRouter from "./routes/health.js";
 import authRouter from "./routes/authRoutes.js";
+import guestRouter from "./routes/guestRoutes.js";
 import apiRouter from "./routes/apiRoutes.js";
 
 dotenv.config({ path: resolve(dirname(fileURLToPath(import.meta.url)), "../.env") });
@@ -19,7 +20,17 @@ const configuredOrigins = (process.env.CLIENT_URL || process.env.CORS_ORIGIN || 
 const isAllowedOrigin = (origin) => {
   if (!origin) return true;
   if (configuredOrigins.includes(origin)) return true;
-  return /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+  try {
+    const url = new URL(origin);
+    if (url.hostname.endsWith(".vercel.app") || url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+      return true;
+    }
+  } catch {
+    // Ignore invalid origin URL format
+  }
+  if (process.env.VERCEL === "1") return true;
+  return false;
 };
 
 const mongoUri = process.env.MONGODB_URI || process.env.MONGO_URI;
@@ -44,7 +55,7 @@ app.use(cors({
     if (isAllowedOrigin(origin)) {
       callback(null, true);
     } else {
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
+      callback(null, false);
     }
   },
   credentials: true,

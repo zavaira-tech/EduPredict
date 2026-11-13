@@ -54,12 +54,37 @@ function GuestRouteNotice() {
   return <Navigate to="/guest" replace state={{ guestMessage: "This section is available to registered users only. Guest mode is read-only." }} />;
 }
 
-function authRequestError(error, fallback) {
-  if (error.response?.data?.message) return error.response.data.message;
-  if (error.response?.data?.error) return error.response.data.error;
-  if (typeof error.response?.data === "string" && error.response.data.trim() && !error.response.data.includes("<!DOCTYPE")) {
-    return error.response.data.trim();
+function extractErrorString(data) {
+  if (!data) return "";
+  if (typeof data === "string") {
+    return data.includes("<!DOCTYPE") ? "" : data.trim();
   }
+  if (typeof data === "object") {
+    if (typeof data.message === "string" && data.message.trim()) {
+      return data.message.trim();
+    }
+    if (typeof data.error === "string" && data.error.trim()) {
+      return data.error.trim();
+    }
+    if (typeof data.error === "object" && data.error !== null) {
+      if (typeof data.error.message === "string" && data.error.message.trim()) {
+        return data.error.message.trim();
+      }
+      if (typeof data.error.code === "string" && data.error.code.trim()) {
+        return data.error.code.trim();
+      }
+    }
+    if (typeof data.code === "string" && data.code.trim()) {
+      return data.code.trim();
+    }
+  }
+  return "";
+}
+
+function authRequestError(error, fallback) {
+  if (!error) return fallback;
+  const backendMsg = extractErrorString(error.response?.data);
+  if (backendMsg) return backendMsg;
   if (error.code === "ERR_NETWORK") {
     return `Cannot reach the EduPredict API at ${api.defaults.baseURL}. Start the backend and verify its port and frontend origin.`;
   }
@@ -69,22 +94,25 @@ function authRequestError(error, fallback) {
   if (error.response?.status) {
     return `Server responded with HTTP ${error.response.status}${error.response.statusText ? ` (${error.response.statusText})` : ""}.`;
   }
-  return error.message || fallback;
+  if (typeof error.message === "string" && error.message.trim()) {
+    return error.message.trim();
+  }
+  return fallback;
 }
 
 function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", initialNotice = "" }) {
   const [mode, setMode] = useState("login");
   const [form, setForm] = useState({ name: "", email: "", password: "" });
-  const [error, setError] = useState(initialError);
-  const [notice, setNotice] = useState(initialNotice);
+  const [error, setError] = useState(typeof initialError === "string" ? initialError : extractErrorString(initialError));
+  const [notice, setNotice] = useState(typeof initialNotice === "string" ? initialNotice : extractErrorString(initialNotice));
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    setError(initialError);
+    setError(typeof initialError === "string" ? initialError : extractErrorString(initialError));
   }, [initialError]);
 
   useEffect(() => {
-    setNotice(initialNotice);
+    setNotice(typeof initialNotice === "string" ? initialNotice : extractErrorString(initialNotice));
   }, [initialNotice]);
 
   const submit = async (event) => {
@@ -123,8 +151,8 @@ function AuthPanel({ onAuthenticated, onContinueAsGuest, initialError = "", init
         <div className="brand-mark auth-brand">E</div>
         <h1>{mode === "login" ? "Welcome back" : "Create your account"}</h1>
         <p>Sign in to your EduPredict workspace.</p>
-        {error && <Alert severity="error">{error}</Alert>}
-        {notice && <Alert severity="info" sx={{ mt: 1 }}>{notice}</Alert>}
+        {error && <Alert severity="error">{typeof error === "string" ? error : (error?.message || JSON.stringify(error))}</Alert>}
+        {notice && <Alert severity="info" sx={{ mt: 1 }}>{typeof notice === "string" ? notice : (notice?.message || JSON.stringify(notice))}</Alert>}
         <form className="auth-form" onSubmit={submit}>
           {mode === "register" && <TextField label="Name" required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} />}
           <TextField label="Email" type="email" required autoComplete="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} />
@@ -187,7 +215,7 @@ function AppContent({ darkMode, onToggleTheme }) {
       .then(({ data }) => setUser(data.expiresAt ? { ...data.user, expiresAt: data.expiresAt } : data.user))
       .catch((requestError) => {
         localStorage.removeItem("edupredict-token");
-        setSessionError(requestError.response?.data?.message || "Unable to validate your session. Sign in again.");
+        setSessionError(extractErrorString(requestError.response?.data) || requestError.message || "Unable to validate your session. Sign in again.");
       })
       .finally(() => setCheckingSession(false));
   }, []);
@@ -219,7 +247,7 @@ function AppContent({ darkMode, onToggleTheme }) {
     api.post(endpoint, {}, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).catch((requestError) => {
-      showToast(requestError.response?.data?.message || "Your local session ended, but the server could not invalidate its token.", "error");
+      showToast(extractErrorString(requestError.response?.data) || requestError.message || "Your local session ended, but the server could not invalidate its token.", "error");
     });
     localStorage.removeItem("edupredict-token");
     setUser(null);

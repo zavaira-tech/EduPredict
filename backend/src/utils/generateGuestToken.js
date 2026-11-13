@@ -13,8 +13,9 @@ export default function generateGuestToken() {
   const issuedAt = Math.floor(Date.now() / 1000);
   return {
     guestId,
+    id: "guest-session",
     token: jwt.sign(
-      { guestId, role: "guest", sessionType: "guest", iat: issuedAt },
+      { id: "guest-session", guestId, role: "guest", sessionType: "guest", iat: issuedAt },
       secret,
       { expiresIn: GUEST_SESSION_TTL_SECONDS },
     ),

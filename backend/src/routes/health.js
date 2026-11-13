@@ -8,8 +8,17 @@ router.get("/", (req, res) => {
 
   res.status(databaseConnected ? 200 : 503).json({
     success: databaseConnected,
+    status: databaseConnected ? "healthy" : "degraded",
     server: "running",
     database: databaseConnected ? "connected" : "disconnected",
+    guestAuth: "available",
+    services: {
+      guestMode: "available",
+      guestDashboard: "available",
+      publicDemoReports: "available",
+      registeredAuth: databaseConnected ? "available" : "unavailable",
+      academicData: databaseConnected ? "available" : "unavailable",
+    },
   });
 });
 

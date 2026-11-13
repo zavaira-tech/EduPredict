@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 import User from "../models/User.js";
 import asyncHandler from "./asyncHandler.js";
 
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const uuidPattern = /^([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|guest-session)$/i;
 
 async function resolveIdentity(req, res) {
   const authorization = req.headers.authorization;
@@ -18,13 +18,14 @@ async function resolveIdentity(req, res) {
   }
   try {
     const payload = jwt.verify(authorization.slice(7), secret);
+    const guestIdentifier = payload?.guestId || payload?.id;
     if (
       payload &&
       typeof payload !== "string" &&
       payload.role === "guest" &&
       payload.sessionType === "guest" &&
-      typeof payload.guestId === "string" &&
-      uuidPattern.test(payload.guestId) &&
+      typeof guestIdentifier === "string" &&
+      uuidPattern.test(guestIdentifier) &&
       typeof payload.iat === "number" &&
       typeof payload.exp === "number" &&
       payload.exp > payload.iat &&
@@ -32,8 +33,9 @@ async function resolveIdentity(req, res) {
       payload.userId === undefined
     ) {
       return {
-        id: payload.guestId,
-        name: "Guest visitor",
+        id: payload.id || payload.guestId || "guest-session",
+        guestId: payload.guestId || payload.id || "guest-session",
+        name: "Guest User",
         role: "guest",
         expiresAt: new Date(payload.exp * 1000).toISOString(),
       };
@@ -51,7 +53,7 @@ async function resolveIdentity(req, res) {
     if (mongoose.connection.readyState !== 1) {
       res.status(503).json({
         success: false,
-        message: "The database is unavailable. Registered-user authentication requires MongoDB.",
+        message: "The database is unavailable. Registered-user and academic-data services require MongoDB.",
       });
       return null;
     }
