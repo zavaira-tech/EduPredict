@@ -215,7 +215,8 @@ function AppContent({ darkMode, onToggleTheme }) {
 
   const logout = () => {
     const token = localStorage.getItem("edupredict-token");
-    api.post("/auth/logout", {}, {
+    const endpoint = user?.role === "guest" ? "/auth/guest/logout" : "/auth/logout";
+    api.post(endpoint, {}, {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     }).catch((requestError) => {
       showToast(requestError.response?.data?.message || "Your local session ended, but the server could not invalidate its token.", "error");
