@@ -3,6 +3,7 @@ import User from "../models/User.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 import generateToken from "../utils/generateToken.js";
 import generateGuestToken from "../utils/generateGuestToken.js";
+import { createNotification, recordActivity } from "../services/adminAudit.js";
 
 const publicUser = (user) => ({
   id: user._id ?? user.id,
@@ -34,6 +35,17 @@ export const register = asyncHandler(async (req, res) => {
     return res.status(403).json({ success: false, message: "Access denied" });
   }
   const user = await User.create({ name, email, password, role: "student" });
+  await Promise.all([
+    recordActivity({ actor: user, action: "user.registered", entityType: "User", entityId: user._id, details: { role: user.role } }),
+    createNotification({
+      title: "New student registration",
+      message: `${user.name} registered a student account.`,
+      type: "user",
+      entityType: "User",
+      entityId: user._id,
+      actor: user,
+    }),
+  ]);
   return res.status(201).json({
     success: true,
     token: generateToken(user),
@@ -47,8 +59,11 @@ export const login = asyncHandler(async (req, res) => {
     return res.status(400).json({ success: false, message: "Email and password are required." });
   }
   const user = await User.findOne({ email: email.trim().toLowerCase() }).select("+password +tokenVersion");
-  if (!user || !(await bcrypt.compare(password, user.password))) {
+  if (!user || !user.isActive || !(await bcrypt.compare(password, user.password))) {
     return res.status(401).json({ success: false, message: "Invalid email or password." });
+  }
+  if (user.role === "admin") {
+    await recordActivity({ actor: user, action: "auth.login", entityType: "User", entityId: user._id });
   }
   return res.json({ success: true, token: generateToken(user), user: publicUser(user) });
 });
@@ -79,6 +94,9 @@ export const me = asyncHandler(async (req, res) => {
 export const logout = asyncHandler(async (req, res) => {
   req.user.tokenVersion = (req.user.tokenVersion ?? 0) + 1;
   await req.user.save();
+  if (req.user.role === "admin") {
+    await recordActivity({ actor: req.user, action: "auth.logout", entityType: "User", entityId: req.user._id });
+  }
   res.json({ success: true, message: "Logged out successfully." });
 });
 
@@ -97,6 +115,7 @@ export const updateProfile = asyncHandler(async (req, res) => {
   if (name !== undefined) req.user.name = name.trim();
   if (email !== undefined) req.user.email = email.trim().toLowerCase();
   await req.user.save();
+  await recordActivity({ actor: req.user, action: "user.profile_updated", entityType: "User", entityId: req.user._id });
   res.json({ success: true, user: publicUser(req.user) });
 });
 
@@ -123,5 +142,6 @@ export const changePassword = asyncHandler(async (req, res) => {
   user.password = newPassword;
   user.tokenVersion = (user.tokenVersion ?? 0) + 1;
   await user.save();
+  await recordActivity({ actor: user, action: "user.password_changed", entityType: "User", entityId: user._id });
   res.json({ success: true, token: generateToken(user), user: publicUser(user) });
 });

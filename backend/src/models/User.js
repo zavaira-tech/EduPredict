@@ -18,6 +18,7 @@ const userSchema = new mongoose.Schema(
       enum: ["admin", "teacher", "student", "analyst"],
       default: "student",
     },
+    isActive: { type: Boolean, default: true },
     tokenVersion: { type: Number, default: 0, select: false },
   },
   { timestamps: true },

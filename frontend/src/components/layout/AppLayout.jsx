@@ -72,6 +72,7 @@ const navigation = [
     label: "MANAGEMENT",
     items: [
       { title: "Datasets", path: "/datasets", icon: Database, roles: ["admin", "analyst"] },
+      { title: "Activity log", path: "/activity", icon: Activity, roles: ["admin"] },
       { title: "Support", path: "/support", icon: CircleHelp, roles: ["admin", "teacher", "student"] },
       { title: "Settings", path: "/settings", icon: Settings, roles: ["admin"] },
     ],
@@ -100,6 +101,7 @@ pageTitles["/admin"] = "Administrator dashboard";
 pageTitles["/teacher"] = "Teacher dashboard";
 pageTitles["/student"] = "Student dashboard";
 pageTitles["/analyst"] = "Analyst dashboard";
+pageTitles["/activity"] = "Activity log";
 
 function SidebarContent({ onNavigate, role, user, onLogout, onUpgrade, onClose, isDrawer = false }) {
   const navigate = useNavigate();
@@ -253,15 +255,24 @@ export default function AppLayout({
       setNotifications([]);
       return;
     }
-    api.get("/alerts")
-      .then(({ data }) => setNotifications((data.data || []).map((item) => ({
-        id: item._id,
-        title: item.title,
-        text: item.message,
-        time: new Date(item.createdAt).toLocaleString(),
-        read: item.isRead,
-      }))))
-      .catch((error) => onNotify(error.response?.data?.message || "Unable to load notifications.", "error"));
+    const loadNotifications = () => {
+      const request = role === "admin"
+        ? api.get("/admin/notifications", { params: { page: 1, limit: 50 } })
+        : api.get("/alerts");
+      request
+        .then(({ data }) => setNotifications((data.data || []).map((item) => ({
+          id: item._id,
+          source: item.source,
+          title: item.title,
+          text: item.message,
+          time: new Date(item.createdAt).toLocaleString(),
+          read: item.isRead,
+        }))))
+        .catch((error) => onNotify(error.response?.data?.message || "Unable to load notifications.", "error"));
+    };
+    loadNotifications();
+    window.addEventListener("edupredict:data-changed", loadNotifications);
+    return () => window.removeEventListener("edupredict:data-changed", loadNotifications);
   }, [onNotify, role]);
 
   const pageTitle = useMemo(() => pageTitles[location.pathname] || "Dashboard", [location.pathname]);
@@ -281,7 +292,12 @@ export default function AppLayout({
 
   const markRead = async (id) => {
     try {
-      await api.put(`/alerts/${id}/read`);
+      const notification = notifications.find((item) => item.id === id);
+      if (role === "admin") {
+        await api.put(`/admin/notifications/${notification?.source || "alert"}/${id}`, { isRead: true });
+      } else {
+        await api.put(`/alerts/${id}/read`);
+      }
       setNotifications((current) =>
         current.map((notification) => notification.id === id ? { ...notification, read: true } : notification),
       );
@@ -292,7 +308,9 @@ export default function AppLayout({
 
   const markAllRead = async () => {
     try {
-      await Promise.all(notifications.filter((item) => !item.read).map((item) => api.put(`/alerts/${item.id}/read`)));
+      await Promise.all(notifications.filter((item) => !item.read).map((item) => role === "admin"
+        ? api.put(`/admin/notifications/${item.source || "alert"}/${item.id}`, { isRead: true })
+        : api.put(`/alerts/${item.id}/read`)));
       setNotifications((current) => current.map((notification) => ({ ...notification, read: true })));
       onNotify("All notifications marked as read.");
     } catch (error) {

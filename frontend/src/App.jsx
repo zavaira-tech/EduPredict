@@ -23,14 +23,19 @@ import ResourcePage from "./components/ResourcePage.jsx";
 import api from "./services/api.js";
 
 const LiveDashboard = lazy(() => import("./components/dashboard/LiveDashboard.jsx"));
+const AdminDashboard = lazy(() => import("./components/dashboard/AdminDashboard.jsx"));
+const AdminUsersPage = lazy(() => import("./components/admin/AdminUsersPage.jsx"));
+const AdminDatasetsPage = lazy(() => import("./components/admin/AdminDatasetsPage.jsx"));
+const AdminStudentsPage = lazy(() => import("./components/admin/AdminStudentsPage.jsx"));
+const AdminActivityPage = lazy(() => import("./components/admin/AdminActivityPage.jsx"));
 const AnalyticsDashboard = lazy(() => import("./components/dashboard/AnalyticsDashboard.jsx"));
 const AnomalyDashboard = lazy(() => import("./components/dashboard/AnomalyDashboard.jsx"));
 const PredictiveAnalyticsDashboard = lazy(() => import("./components/dashboard/PredictiveAnalyticsDashboard.jsx"));
 const GuestDashboard = lazy(() => import("./components/dashboard/GuestDashboard.jsx"));
 
 const resourceRoutes = [
-  "users", "students", "teachers", "courses", "enrollments", "attendance", "performance",
-  "predictions", "datasets", "alerts", "support",
+  "teachers", "courses", "enrollments", "attendance", "performance",
+  "predictions", "alerts", "support",
 ];
 const resourceRoles = {
   users: ["admin"],
@@ -326,11 +331,33 @@ function AppContent({ darkMode, onToggleTheme }) {
               path={path}
               element={user.role === role
                 ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}>
-                    <LiveDashboard role={role} onNotify={showToast} />
+                    {role === "admin"
+                      ? <AdminDashboard onNotify={showToast} />
+                      : <LiveDashboard role={role} onNotify={showToast} />}
                   </Suspense>
                 : <AccessDenied />}
             />
           ))}
+          <Route path="/users" element={user.role === "admin"
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AdminUsersPage user={user} onNotify={showToast} /></Suspense>
+            : user.role === "guest" ? <GuestRouteNotice /> : <AccessDenied />} />
+          <Route path="/datasets" element={user.role === "admin"
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AdminDatasetsPage onNotify={showToast} /></Suspense>
+            : user.role === "guest"
+              ? <GuestRouteNotice />
+              : resourceRoles.datasets.includes(user.role)
+                ? <ResourcePage resource="datasets" role={user.role} search={search} onNotify={showToast} />
+                : <AccessDenied />} />
+          <Route path="/students" element={user.role === "admin"
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AdminStudentsPage /></Suspense>
+            : user.role === "guest"
+              ? <GuestRouteNotice />
+              : resourceRoles.students.includes(user.role)
+                ? <ResourcePage resource="students" role={user.role} search={search} onNotify={showToast} />
+                : <AccessDenied />} />
+          <Route path="/activity" element={user.role === "admin"
+            ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><AdminActivityPage /></Suspense>
+            : user.role === "guest" ? <GuestRouteNotice /> : <AccessDenied />} />
           <Route path="/guest" element={user.role === "guest"
             ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><GuestDashboard onUpgrade={requestGuestUpgrade} /></Suspense>
             : <Navigate to="/" replace />} />

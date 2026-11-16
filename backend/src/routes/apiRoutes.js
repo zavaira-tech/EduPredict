@@ -37,11 +37,13 @@ import asyncHandler from "../middleware/asyncHandler.js";
 import { authenticateRegistered } from "../middleware/authMiddleware.js";
 import requireDatabase from "../middleware/requireDatabase.js";
 import { authorizeRoles as allowRoles } from "../middleware/roleMiddleware.js";
+import adminRouter from "./adminRoutes.js";
 import mlRouter from "./mlRoutes.js";
 
 const router = Router();
 router.use(authenticateRegistered);
 router.use(requireDatabase);
+router.use("/admin", adminRouter);
 router.use("/ml", mlRouter);
 router.get("/dashboard/summary", allowRoles("admin", "analyst", "teacher", "student"), getSummary);
 const analyticsReaders = ["admin", "analyst", "teacher", "student"];

@@ -56,9 +56,13 @@ async function resolveIdentity(req, res) {
       });
       return null;
     }
-    const user = await User.findById(payload.userId).select("_id name email role +tokenVersion");
+    const user = await User.findById(payload.userId).select("_id name email role isActive +tokenVersion");
     if (!user) {
       res.status(401).json({ success: false, message: "User account no longer exists." });
+      return null;
+    }
+    if (!user.isActive) {
+      res.status(403).json({ success: false, message: "This account has been deactivated." });
       return null;
     }
     if (payload.tokenVersion !== (user.tokenVersion ?? 0)) {
