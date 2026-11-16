@@ -33,9 +33,8 @@ async function resolveIdentity(req, res) {
       payload.userId === undefined
     ) {
       return {
-        id: payload.id || payload.guestId || "guest-session",
-        guestId: payload.guestId || payload.id || "guest-session",
-        name: "Guest User",
+        id: payload.guestId || payload.id || "guest-session",
+        name: "Guest visitor",
         role: "guest",
         expiresAt: new Date(payload.exp * 1000).toISOString(),
       };

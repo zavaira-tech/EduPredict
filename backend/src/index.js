@@ -3,7 +3,8 @@ import dotenv from "dotenv";
 import express from "express";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import mongoose, { connectToDatabase } from "./config/db.js";
+import connectDB, { connectToDatabase } from "./config/db.js";
+import mongoose from "mongoose";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler.js";
 import healthRouter from "./routes/health.js";
 import authRouter from "./routes/authRoutes.js";
@@ -63,6 +64,7 @@ app.use(cors({
 app.use(express.json({ limit: "1mb" }));
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
+app.use("/api/guest", guestRouter);
 app.use("/api", apiRouter);
 app.use(notFoundHandler);
 app.use(errorHandler);
@@ -75,7 +77,7 @@ const hasMongoUri =
 
 if (hasMongoUri) {
   try {
-    await connectToDatabase(mongoUri);
+    await connectDB(mongoUri);
     console.log(`MongoDB connected successfully (database: ${mongoose.connection.name}).`);
   } catch (error) {
     const reason = error instanceof Error ? error.name : "UnknownError";
