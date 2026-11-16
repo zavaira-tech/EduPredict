@@ -8,24 +8,33 @@ account, and role changes or password resets invalidate existing tokens.
 
 Administrators can create teacher and analyst accounts from **Users**. An
 administrator account must be provisioned by a trusted operator; never add a
-public administrator-signup option. For a first administrator:
+public administrator-signup option. To create the first administrator, set
+`ADMIN_SEED_PASSWORD` privately in PowerShell, run the idempotent seed command,
+and then remove the environment variable:
 
-1. In PowerShell, enter a strong initial password without echoing it and
-   generate its bcrypt hash from the backend directory:
+```powershell
+$securePassword = Read-Host "Initial administrator password" -AsSecureString
+$env:ADMIN_SEED_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
+npm run seed:admin
+Remove-Item Env:ADMIN_SEED_PASSWORD
+```
 
-   ```powershell
-   $securePassword = Read-Host "Initial administrator password" -AsSecureString
-   $env:ADMIN_PASSWORD = [System.Net.NetworkCredential]::new("", $securePassword).Password
-   node --input-type=module -e "import bcrypt from 'bcryptjs'; console.log(await bcrypt.hash(process.env.ADMIN_PASSWORD, 12))"
-   Remove-Item Env:ADMIN_PASSWORD
-   ```
+By default, the seed uses `EduPredict Admin` and `admin@edupredict.com`.
+`ADMIN_SEED_NAME` and `ADMIN_SEED_EMAIL` can override those values. The password
+is required and is never embedded in the script or exposed by an API. The
+existing `User` save hook hashes it using bcrypt before MongoDB stores it.
+Running the seed again does not create a duplicate or change an existing
+account's role.
 
-2. Connect `mongosh` to the configured MongoDB database and insert a `users`
-   document with `name`, unique lowercase `email`, the generated hash as
-   `password`, `role: "admin"`, `tokenVersion: 0`, and timestamps. Do not insert
-   a plaintext password or commit the hash or credentials to source control.
-3. Sign in through the app and create accounts from the administrator's
-   **Users** page.
+To verify the record, open the configured database's `users` collection in
+MongoDB Compass and check its name, email, and `admin` role. The `password`
+field should begin with a bcrypt prefix such as `$2a$12$`; it must not equal
+the password entered at the prompt. Then sign in at the EduPredict login page
+with `admin@edupredict.com` and the password entered during seeding.
+
+Use the development password from your prompt only for local testing. Use a
+private, strong password for any shared or deployed environment; never commit
+it to `.env.example`, source control, or a public API.
 
 Creating an account does not create its academic profile. For a teacher,
 create a teacher record in **Teachers** and set its `user` field to the account
