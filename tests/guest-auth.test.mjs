@@ -11,6 +11,8 @@ import {
   authenticateRegistered,
 } from "../backend/src/middleware/authMiddleware.js";
 import { authorizeRoles } from "../backend/src/middleware/roleMiddleware.js";
+import { register } from "../backend/src/controllers/authController.js";
+import { scopedFilter } from "../backend/src/controllers/entityController.js";
 
 const originalSecret = process.env.JWT_SECRET;
 process.env.JWT_SECRET = "guest-auth-test-secret-that-is-long-enough";
@@ -170,6 +172,32 @@ test("the four registered roles remain admissible by their matching role checks"
     authorizeRoles(role)(req, res, () => { nextCalled = true; });
     assert.equal(nextCalled, true, `${role} should retain its existing role access`);
   }
+});
+
+test("public registration rejects privileged roles before database access", async () => {
+  for (const role of ["admin", "teacher", "analyst"]) {
+    const res = createResponse();
+    let forwardedError = null;
+    await register(
+      { body: { name: "Privileged User", email: `${role}@example.test`, password: "example-password", role } },
+      res,
+      (error) => { forwardedError = error; },
+    );
+    assert.equal(forwardedError, null);
+    assert.equal(res.statusCode, 403, `${role} must not be selectable through public signup`);
+  }
+});
+
+test("analyst dataset queries are limited to datasets they uploaded", async () => {
+  const userId = "507f1f77bcf86cd799439011";
+  assert.deepEqual(
+    await scopedFilter({ user: { role: "analyst", _id: userId } }, "datasets"),
+    { uploadedBy: userId },
+  );
+  assert.deepEqual(
+    await scopedFilter({ user: { role: "admin", _id: "507f191e810c19729de860ea" } }, "datasets"),
+    {},
+  );
 });
 
 test.after(() => {

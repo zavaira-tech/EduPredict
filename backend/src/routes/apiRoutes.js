@@ -124,9 +124,9 @@ router.use("/predictions", predictionRoutes);
 
 defineResource("datasets", "datasets", {
   read: ["admin", "analyst"],
-  create: ["admin"],
-  update: [],
-  remove: ["admin"],
+  create: ["admin", "analyst"],
+  update: ["admin", "analyst"],
+  remove: ["admin", "analyst"],
   detail: false,
 });
 defineResource("alerts", "alerts", {
@@ -153,6 +153,9 @@ router.get(
     res.json({ success: true, data: users });
   }),
 );
+const userRoles = ["admin", "teacher", "student", "analyst"];
+const validEmail = (email) => typeof email === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
 router.post(
   "/users",
   allowRoles("admin"),
@@ -161,14 +164,17 @@ router.post(
     if (
       typeof name !== "string" ||
       !name.trim() ||
-      typeof email !== "string" ||
-      !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ||
+      name.trim().length > 100 ||
+      !validEmail(email) ||
       typeof password !== "string" ||
       password.length < 8 ||
       Buffer.byteLength(password, "utf8") > 72 ||
-      !["admin", "teacher", "student", "analyst"].includes(role)
+      !["teacher", "analyst"].includes(role)
     ) {
-      return res.status(400).json({ success: false, message: "Name, valid email, password, and role are required." });
+      return res.status(400).json({
+        success: false,
+        message: "A valid name, email, password, and teacher or analyst role are required.",
+      });
     }
     const user = await User.create({ name: name.trim(), email: email.trim().toLowerCase(), password, role });
     res.status(201).json({
@@ -178,11 +184,67 @@ router.post(
   }),
 );
 router.put(
+  "/users/:id",
+  allowRoles("admin"),
+  asyncHandler(async (req, res) => {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id)) {
+      return res.status(400).json({ success: false, message: "Invalid user ID." });
+    }
+    const { name, email, password, role } = req.body || {};
+    if (
+      (name !== undefined && (typeof name !== "string" || !name.trim() || name.trim().length > 100)) ||
+      (email !== undefined && !validEmail(email)) ||
+      (password !== undefined &&
+        (typeof password !== "string" ||
+          password.length < 8 ||
+          Buffer.byteLength(password, "utf8") > 72)) ||
+      (role !== undefined && !userRoles.includes(role))
+    ) {
+      return res.status(400).json({ success: false, message: "Enter valid user details and role." });
+    }
+    if (name === undefined && email === undefined && password === undefined && role === undefined) {
+      return res.status(400).json({ success: false, message: "Provide at least one user field to update." });
+    }
+
+    const user = await User.findById(req.params.id).select("+tokenVersion");
+    if (!user) return res.status(404).json({ success: false, message: "User not found." });
+    if (user._id.equals(req.user._id) && password !== undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Use the profile password-change form to update your own password.",
+      });
+    }
+    if (user._id.equals(req.user._id) && role !== undefined && role !== "admin") {
+      return res.status(400).json({ success: false, message: "You cannot remove your own administrator role." });
+    }
+    if (user.role === "admin" && role !== undefined && role !== "admin") {
+      const admins = await User.countDocuments({ role: "admin" });
+      if (admins <= 1) {
+        return res.status(400).json({ success: false, message: "The last administrator cannot be demoted." });
+      }
+    }
+
+    let invalidateTokens = false;
+    if (name !== undefined) user.name = name.trim();
+    if (email !== undefined) user.email = email.trim().toLowerCase();
+    if (role !== undefined && role !== user.role) {
+      user.role = role;
+      invalidateTokens = true;
+    }
+    if (password !== undefined) {
+      user.password = password;
+      invalidateTokens = true;
+    }
+    if (invalidateTokens) user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+    await user.save();
+    res.json({ success: true, data: user });
+  }),
+);
+router.put(
   "/users/:id/role",
   allowRoles("admin"),
   asyncHandler(async (req, res) => {
-    const roles = ["admin", "teacher", "student", "analyst"];
-    if (!/^[a-f\d]{24}$/i.test(req.params.id) || !roles.includes(req.body?.role)) {
+    if (!/^[a-f\d]{24}$/i.test(req.params.id) || !userRoles.includes(req.body?.role)) {
       return res.status(400).json({ success: false, message: "A valid user ID and role are required." });
     }
     const user = await User.findById(req.params.id).select("+tokenVersion");

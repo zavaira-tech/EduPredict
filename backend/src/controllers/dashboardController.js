@@ -3,6 +3,8 @@ import Attendance from "../models/Attendance.js";
 import Performance from "../models/Performance.js";
 import Student from "../models/Student.js";
 import Teacher from "../models/Teacher.js";
+import Dataset from "../models/Dataset.js";
+import User from "../models/User.js";
 import Course from "../models/Course.js";
 import asyncHandler from "../middleware/asyncHandler.js";
 
@@ -67,7 +69,7 @@ export const getSummary = asyncHandler(async (req, res) => {
     });
   }
 
-  const [students, teachers, courses, attendance, gpa, atRiskStudents, activeAlerts] =
+  const [students, teachers, courses, attendance, gpa, atRiskStudents, activeAlerts, users, datasets] =
     await Promise.all([
       Student.countDocuments(),
       Teacher.countDocuments(),
@@ -78,6 +80,8 @@ export const getSummary = asyncHandler(async (req, res) => {
         $or: [{ gpa: { $lt: 2.5 } }, { attendancePercentage: { $lt: 75 } }],
       }),
       Alert.countDocuments({ isRead: false }),
+      User.countDocuments(),
+      Dataset.countDocuments(),
     ]);
 
   res.json({
@@ -90,6 +94,8 @@ export const getSummary = asyncHandler(async (req, res) => {
       averageGPA: Number((gpa[0]?.average || 0).toFixed(2)),
       atRiskStudents,
       activeAlerts,
+      users,
+      datasets,
     },
   });
 });

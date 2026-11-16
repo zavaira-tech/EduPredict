@@ -100,8 +100,8 @@ const definitions = {
   users: {
     title: "Users", fields: [
       ["name", "Name", "text", true], ["email", "Email", "email", true],
-      ["password", "Temporary password", "password", true],
-      ["role", "Role", "select", true, ["admin", "teacher", "student", "analyst"]],
+      ["password", "Initial password", "password", true],
+      ["role", "Role", "select", true, ["teacher", "analyst"]],
     ], actions: ["add", "edit", "delete"], columns: ["name", "email", "role", "createdAt"],
   },
 };
@@ -135,9 +135,11 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
   const [form, setForm] = useState({});
   const [referenceOptions, setReferenceOptions] = useState({ students: [], courses: [] });
   const canCreate = role === "admin" ||
+    (role === "analyst" && resource === "datasets") ||
     (role === "teacher" && ["attendance", "performance", "support"].includes(resource)) ||
     (role === "student" && resource === "support");
-  const canManage = role === "admin" && ["students", "teachers", "courses", "enrollments", "attendance", "performance", "datasets", "alerts", "users"].includes(resource);
+  const canManage = (role === "admin" && ["students", "teachers", "courses", "enrollments", "attendance", "performance", "datasets", "alerts", "users"].includes(resource)) ||
+    (role === "analyst" && resource === "datasets");
   const canEditAcademic = role === "teacher" && ["attendance", "performance"].includes(resource);
   const canEditSupport = resource === "support";
 
@@ -188,7 +190,7 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
       if (payload[key] !== undefined && type === "number") payload[key] = Number(payload[key]);
     }
     try {
-      if (editing && resource === "users") await api.put(`/users/${editing._id}/role`, { role: payload.role });
+      if (editing && resource === "users") await api.put(`/users/${editing._id}`, payload);
       else if (editing) await api.put(`/${resource}/${editing._id}`, payload);
       else await api.post(`/${resource}`, payload);
       setDialogOpen(false);
@@ -230,17 +232,6 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
       <Paper className="resource-table-panel" elevation={0}>
         {loading ? <div className="loading-view"><CircularProgress size={26} /></div> : visibleRecords.length === 0 ? (
           <div className="resource-empty"><h2>No {definition.title.toLowerCase()} found</h2><p>{search ? "Try changing the search term." : "Records will appear here when available."}</p></div>
-        ) : type === "studentRef" || type === "courseRef" ? (
-          <Autocomplete
-            key={key}
-            options={referenceOptions[type === "studentRef" ? "students" : "courses"]}
-            value={referenceOptions[type === "studentRef" ? "students" : "courses"].find((item) => item._id === form[key]) || null}
-            getOptionLabel={(item) => type === "studentRef"
-              ? `${item.studentId} — ${item.name}`
-              : `${item.courseCode} — ${item.courseName}`}
-            onChange={(_, item) => setForm({ ...form, [key]: item?._id || "" })}
-            renderInput={(params) => <TextField {...params} label={label} required={required} />}
-          />
         ) : (
           <Table size="small">
             <TableHead><TableRow>{definition.columns.map((column) => <TableCell key={column}>{column.replace(/[A-Z]/g, (letter) => ` ${letter}`).toUpperCase()}</TableCell>)}{(canManage || canEditAcademic || canEditSupport || resource === "alerts") && <TableCell>Actions</TableCell>}</TableRow></TableHead>
@@ -260,18 +251,44 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
           <DialogTitle>{editing ? "Update" : "Add"} {definition.title}</DialogTitle>
           <DialogContent className="resource-form">
             {definition.fields
-              .filter(([key]) =>
-                !(resource === "support" && key === "status" && (!editing || role !== "admin")) &&
-                !(resource === "users" && key === "password" && editing)
-              )
               .map(([key, label, type = "text", required = false, options]) => (
-              type === "select" ? (
-                <TextField key={key} select label={label} required={required} value={form[key] ?? ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })}>
-                  {options.map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
-                </TextField>
-              ) : (
-                <TextField key={key} label={label} type={type === "textarea" ? "text" : type} multiline={type === "textarea"} minRows={type === "textarea" ? 3 : undefined} required={required} value={form[key] ?? ""} onChange={(event) => setForm({ ...form, [key]: event.target.value })} InputLabelProps={type === "date" ? { shrink: true } : undefined} />
-              )
+                (resource === "support" && key === "status" && (!editing || role !== "admin")) ? null :
+                  type === "select" ? (
+                    <TextField
+                      key={key}
+                      select
+                      label={label}
+                      required={required && !(resource === "users" && editing)}
+                      value={form[key] ?? ""}
+                      onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+                    >
+                      {(resource === "users" && editing ? ["admin", "teacher", "student", "analyst"] : options)
+                        .map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
+                    </TextField>
+                  ) : type === "studentRef" || type === "courseRef" ? (
+                    <Autocomplete
+                      key={key}
+                      options={referenceOptions[type === "studentRef" ? "students" : "courses"]}
+                      value={referenceOptions[type === "studentRef" ? "students" : "courses"].find((item) => item._id === form[key]) || null}
+                      getOptionLabel={(item) => type === "studentRef"
+                        ? `${item.studentId} — ${item.name}`
+                        : `${item.courseCode} — ${item.courseName}`}
+                      onChange={(_, item) => setForm({ ...form, [key]: item?._id || "" })}
+                      renderInput={(params) => <TextField {...params} label={label} required={required} />}
+                    />
+                  ) : (
+                    <TextField
+                      key={key}
+                      label={resource === "users" && key === "password" ? "New password (optional)" : label}
+                      type={type === "textarea" ? "text" : type}
+                      multiline={type === "textarea"}
+                      minRows={type === "textarea" ? 3 : undefined}
+                      required={required && !(resource === "users" && editing)}
+                      value={form[key] ?? ""}
+                      onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+                      InputLabelProps={type === "date" ? { shrink: true } : undefined}
+                    />
+                  )
             ))}
           </DialogContent>
           <DialogActions><Button onClick={() => setDialogOpen(false)}>Cancel</Button><Button type="submit" variant="contained">Save</Button></DialogActions>

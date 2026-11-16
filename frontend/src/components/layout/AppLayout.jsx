@@ -84,12 +84,22 @@ const guestNavigation = [
     items: [{ title: "Guest dashboard", path: "/guest", icon: LayoutDashboard }],
   },
 ];
+const roleDashboardPaths = {
+  admin: "/admin",
+  teacher: "/teacher",
+  student: "/student",
+  analyst: "/analyst",
+};
 
 const pageTitles = Object.fromEntries(
   navigation.flatMap((group) => group.items.map((item) => [item.path, item.title])),
 );
 pageTitles["/profile"] = "My profile";
 pageTitles["/guest"] = "Guest dashboard";
+pageTitles["/admin"] = "Administrator dashboard";
+pageTitles["/teacher"] = "Teacher dashboard";
+pageTitles["/student"] = "Student dashboard";
+pageTitles["/analyst"] = "Analyst dashboard";
 
 function SidebarContent({ onNavigate, role, user, onLogout, onUpgrade, onClose, isDrawer = false }) {
   const navigate = useNavigate();
@@ -143,21 +153,24 @@ function SidebarContent({ onNavigate, role, user, onLogout, onUpgrade, onClose, 
           return (
             <div className="nav-group" key={group.label}>
               <div className="nav-group-title">{group.label}</div>
-              {visibleItems.map(({ title, path, icon: Icon, badge }) => (
-                <NavLink
-                  key={path}
-                  to={path}
-                  end={path === "/"}
-                  onClick={onNavigate}
-                  className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
-                >
-                  <div className="nav-icon-wrap">
-                    <Icon size={18} strokeWidth={1.8} />
-                  </div>
-                  <span className="nav-label">{title}</span>
-                  {badge && <small className={`nav-badge ${badge === "NEW" ? "badge-new" : ""}`}>{badge}</small>}
-                </NavLink>
-              ))}
+              {visibleItems.map(({ title, path: originalPath, icon: Icon, badge }) => {
+                const path = originalPath === "/" ? roleDashboardPaths[role] : originalPath;
+                return (
+                  <NavLink
+                    key={path}
+                    to={path}
+                    end={path === "/"}
+                    onClick={onNavigate}
+                    className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+                  >
+                    <div className="nav-icon-wrap">
+                      <Icon size={18} strokeWidth={1.8} />
+                    </div>
+                    <span className="nav-label">{title}</span>
+                    {badge && <small className={`nav-badge ${badge === "NEW" ? "badge-new" : ""}`}>{badge}</small>}
+                  </NavLink>
+                );
+              })}
             </div>
           );
         })}

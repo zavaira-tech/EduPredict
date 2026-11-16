@@ -24,9 +24,12 @@ const models = {
   support: SupportTicket,
 };
 
-async function scopedFilter(req, modelName) {
+export async function scopedFilter(req, modelName) {
   const user = req.user;
-  if (user.role === "admin" || user.role === "analyst") return {};
+  if (user.role === "admin") return {};
+  if (user.role === "analyst") {
+    return modelName === "datasets" ? { uploadedBy: user._id } : {};
+  }
 
   if (user.role === "student") {
     const profile = await Student.findOne({ user: user._id }).select("_id");
@@ -281,7 +284,10 @@ export function deleteEntity(modelName) {
         });
       }
     }
-    const record = await models[modelName].findByIdAndDelete(req.params.id);
+    const filter = await scopedFilter(req, modelName);
+    const record = await models[modelName].findOneAndDelete({
+      $and: [{ _id: req.params.id }, filter],
+    });
     if (!record) return res.status(404).json({ success: false, message: "Record not found." });
     res.json({ success: true, message: "Record deleted." });
   });

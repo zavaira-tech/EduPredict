@@ -93,7 +93,8 @@ application results.
 See [docs/analytics.md](./docs/analytics.md) for analytics API documentation,
 formulas, role scopes, Python service setup, report exports, and tests. See
 [docs/guest-mode.md](./docs/guest-mode.md) for guest session behavior,
-permissions, and verification.
+permissions, and verification. See [docs/role-based-auth.md](./docs/role-based-auth.md)
+for administrator provisioning and role-by-role authentication checks.
 
 ```text
 EduPredict/

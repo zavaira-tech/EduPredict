@@ -45,6 +45,12 @@ const resourceRoles = {
   alerts: ["admin", "teacher", "student", "analyst"],
   support: ["admin", "teacher", "student"],
 };
+const roleDashboardPaths = {
+  admin: "/admin",
+  teacher: "/teacher",
+  student: "/student",
+  analyst: "/analyst",
+};
 
 function AccessDenied() {
   return <Alert severity="error">You do not have permission to access this section.</Alert>;
@@ -282,6 +288,7 @@ function AppContent({ darkMode, onToggleTheme }) {
   const onAuthenticated = (authenticatedUser) => {
     setSessionError("");
     setAuthNotice("");
+    window.history.replaceState(null, "", roleDashboardPaths[authenticatedUser.role] || "/");
     setUser(authenticatedUser);
   };
 
@@ -311,14 +318,19 @@ function AppContent({ darkMode, onToggleTheme }) {
         <Routes>
           <Route
             path="/"
-            element={
-              user.role === "guest"
-                ? <Navigate to="/guest" replace />
-                : <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}>
-                    <LiveDashboard onNotify={showToast} />
-                  </Suspense>
-            }
+            element={<Navigate to={user.role === "guest" ? "/guest" : roleDashboardPaths[user.role]} replace />}
           />
+          {Object.entries(roleDashboardPaths).map(([role, path]) => (
+            <Route
+              key={role}
+              path={path}
+              element={user.role === role
+                ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}>
+                    <LiveDashboard role={role} onNotify={showToast} />
+                  </Suspense>
+                : <AccessDenied />}
+            />
+          ))}
           <Route path="/guest" element={user.role === "guest"
             ? <Suspense fallback={<Box className="loading-view"><CircularProgress size={26} /></Box>}><GuestDashboard onUpgrade={requestGuestUpgrade} /></Suspense>
             : <Navigate to="/" replace />} />
