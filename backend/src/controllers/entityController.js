@@ -82,7 +82,33 @@ function isValidId(id) {
   return mongoose.isValidObjectId(id);
 }
 
-async function validateEntityReferences(modelName, fields, recordId, { requireActiveTeacher = false } = {}) {
+async function validateDepartmentSelection(value) {
+  if (typeof value !== "string" || !value.trim()) return "Department is required.";
+  const department = value.trim();
+  const [knownDepartment, hasAnyDepartment] = await Promise.all([
+    Promise.all([
+      Student.exists({ department }),
+      Teacher.exists({ department }),
+      Course.exists({ department }),
+    ]),
+    Promise.all([
+      Student.exists({ department: { $type: "string", $ne: "" } }),
+      Teacher.exists({ department: { $type: "string", $ne: "" } }),
+      Course.exists({ department: { $type: "string", $ne: "" } }),
+    ]),
+  ]);
+  if (!knownDepartment.some(Boolean) && hasAnyDepartment.some(Boolean)) {
+    return "Select an existing department.";
+  }
+  return null;
+}
+
+async function validateEntityReferences(
+  modelName,
+  fields,
+  recordId,
+  { requireActiveTeacher = false, requireKnownDepartment = false } = {},
+) {
   if (["attendance", "performance"].includes(modelName)) {
     if (
       fields.academicYear !== undefined &&
@@ -110,6 +136,17 @@ async function validateEntityReferences(modelName, fields, recordId, { requireAc
     if (!user) return `The linked user account must have the ${expectedRole} role.`;
     if (!recordId && user.isActive === false) return "The linked user account must be active.";
     if (existingProfile) return "This user account is already linked to a profile.";
+  }
+  if (requireKnownDepartment && ["students", "teachers", "courses"].includes(modelName)) {
+    const departmentError = await validateDepartmentSelection(fields.department);
+    if (departmentError) return departmentError;
+  }
+  if (
+    modelName === "students" &&
+    (!Number.isInteger(Number(fields.semester)) ||
+      ![1, 2, 3, 4, 5, 6, 7, 8].includes(Number(fields.semester)))
+  ) {
+    return "Semester must be a whole number from 1 to 8.";
   }
   if (modelName === "courses") {
     if (typeof fields.courseCode !== "string" || !fields.courseCode.trim()) {
@@ -144,6 +181,26 @@ async function validateEntityReferences(modelName, fields, recordId, { requireAc
     if (requireActiveTeacher && teacher.user.isActive === false) {
       return "The selected teacher is inactive.";
     }
+  }
+  if (modelName === "alerts" && fields.student) {
+    if (!isValidId(fields.student) || !(await Student.exists({ _id: fields.student }))) {
+      return "The selected student record does not exist.";
+    }
+  }
+  if (modelName === "predictions") {
+    const needsStudent = fields.predictionType !== "courseDemand";
+    if ((needsStudent && !isValidId(fields.student)) || (fields.student && !isValidId(fields.student))) {
+      return "A valid student record is required.";
+    }
+    const needsCourse = fields.predictionType === "courseDemand";
+    if ((needsCourse && !isValidId(fields.course)) || (fields.course && !isValidId(fields.course))) {
+      return "A valid course record is required.";
+    }
+    const [student, course] = await Promise.all([
+      fields.student ? Student.exists({ _id: fields.student }) : Promise.resolve(true),
+      fields.course ? Course.exists({ _id: fields.course }) : Promise.resolve(true),
+    ]);
+    if (!student || !course) return "The selected student or course record does not exist.";
   }
   if (["attendance", "performance"].includes(modelName)) {
     if (!isValidId(fields.student) || !isValidId(fields.course)) {
@@ -214,6 +271,9 @@ const lookupRoles = {
   programs: ["admin"],
   academicYears: ["admin", "teacher", "student", "analyst"],
   alertTypes: ["admin"],
+  datasetTypes: ["admin", "analyst"],
+  studentStatuses: ["admin"],
+  grades: ["admin", "teacher"],
 };
 
 function escapeRegex(value) {
@@ -248,7 +308,7 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
   ) {
     return res.status(400).json({ success: false, message: "Invalid lookup pagination or search query." });
   }
-  for (const key of ["role", "department", "semester", "studentId", "courseId", "teacherId", "requireEnrollment", "unassigned"]) {
+  for (const key of ["role", "department", "semester", "studentId", "courseId", "teacherId", "requireEnrollment", "requirePerformance", "unassigned"]) {
     if (req.query[key] !== undefined && typeof req.query[key] !== "string") {
       return res.status(400).json({ success: false, message: `Invalid ${key} lookup filter.` });
     }
@@ -265,7 +325,10 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
   let records = [];
   let total = 0;
 
-  if (type === "departments" || type === "programs" || type === "academicYears" || type === "alertTypes") {
+  if (
+    ["departments", "programs", "academicYears", "alertTypes", "datasetTypes", "studentStatuses", "grades"]
+      .includes(type)
+  ) {
     let values;
     if (type === "departments") {
       const [studentDepartments, teacherDepartments, courseDepartments] = await Promise.all([
@@ -326,6 +389,12 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
         ]);
         values = [...enrollmentYears, ...attendanceYears, ...performanceYears];
       }
+    } else if (type === "datasetTypes") {
+      values = await Dataset.distinct("fileType", await scopedFilter(req, "datasets"));
+    } else if (type === "studentStatuses") {
+      values = await Student.distinct("academicStatus");
+    } else if (type === "grades") {
+      values = await Performance.distinct("grade", await scopedFilter(req, "performance"));
     } else {
       values = await Alert.distinct("type");
     }
@@ -460,9 +529,21 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
           filter.semester = student.semester;
         }
       }
+      if (req.query.requirePerformance === "true" && req.query.studentId) {
+        const coursesWithPerformance = await Performance.distinct("course", {
+          student: req.query.studentId,
+        });
+        const allowedCourseIds = filter._id?.$in
+          ? filter._id.$in.filter((id) => coursesWithPerformance.some((courseId) => courseId.equals(id)))
+          : coursesWithPerformance;
+        filter._id = { $in: allowedCourseIds };
+      }
     }
 
-    if (type === "courses" && req.query.requireEnrollment === "true" && !req.query.studentId) {
+    if (
+      type === "courses" &&
+      ((req.query.requireEnrollment === "true" || req.query.requirePerformance === "true") && !req.query.studentId)
+    ) {
       return res.json({
         success: true,
         data: [],
@@ -617,6 +698,10 @@ export function createEntity(modelName) {
       body.name = user.name;
       body.email = user.email;
       body.department = body.department.trim();
+      const departmentError = await validateDepartmentSelection(body.department);
+      if (departmentError) {
+        return res.status(400).json({ success: false, message: departmentError });
+      }
       body.specialization = body.specialization ? String(body.specialization).trim() : "";
 
       // Ensure server securely generates Teacher ID, preventing manual tampering
@@ -643,6 +728,7 @@ export function createEntity(modelName) {
 
     const referenceError = await validateEntityReferences(modelName, body, undefined, {
       requireActiveTeacher: modelName === "courses" && Boolean(body.teacher),
+      requireKnownDepartment: ["students", "courses"].includes(modelName),
     });
     if (referenceError) {
       return res.status(400).json({ success: false, message: referenceError });
@@ -721,6 +807,10 @@ export function updateEntity(modelName) {
           modelName === "courses" &&
           changes.teacher !== undefined &&
           String(changes.teacher || "") !== String(record.teacher || ""),
+        requireKnownDepartment:
+          ["students", "teachers", "courses"].includes(modelName) &&
+          changes.department !== undefined &&
+          String(changes.department || "").trim() !== String(record.department || "").trim(),
       },
     );
     if (referenceError) {

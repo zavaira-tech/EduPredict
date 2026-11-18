@@ -27,7 +27,7 @@ const definitions = {
       ["email", "Email", "email", true], ["department", "Department", "departmentRef", true],
       ["program", "Program", "programRef", true], ["semester", "Semester", "semester", true],
       ["user", "User account", "userRef"], ["gender", "Gender"], ["age", "Age", "number"], ["attendancePercentage", "Attendance %", "number"],
-      ["gpa", "GPA", "number"], ["academicStatus", "Academic status"],
+      ["gpa", "GPA", "number"], ["academicStatus", "Academic status", "studentStatusRef"],
     ], actions: ["add", "edit", "delete"], columns: ["studentId", "name", "email", "department", "program", "semester", "gpa"],
   },
   teachers: {
@@ -72,7 +72,7 @@ const definitions = {
       ["academicYear", "Academic year", "academicYearRef"],
       ["assignmentScore", "Assignment score", "number"], ["quizScore", "Quiz score", "number"],
       ["midtermScore", "Midterm score", "number"], ["finalScore", "Final score", "number"],
-      ["totalScore", "Total score", "number"], ["grade", "Grade"], ["gpa", "GPA", "number"], ["semester", "Semester", "semester"],
+      ["totalScore", "Total score", "number"], ["grade", "Grade", "gradeRef"], ["gpa", "GPA", "number"], ["semester", "Semester", "semester"],
     ], actions: ["add", "edit"], columns: ["student", "course", "totalScore", "grade", "gpa", "semester"],
   },
   predictions: {
@@ -86,7 +86,7 @@ const definitions = {
   datasets: {
     title: "Datasets", fields: [
       ["name", "Dataset name", "text", true], ["description", "Description", "textarea"],
-      ["fileName", "File name", "text", true], ["fileType", "File type", "text", true], ["records", "Record count", "number"],
+      ["fileName", "File name", "text", true], ["fileType", "File type", "datasetTypeRef", true], ["records", "Record count", "number"],
     ], actions: ["add", "delete"], columns: ["name", "fileName", "fileType", "records", "status", "createdAt"],
   },
   alerts: {
@@ -162,6 +162,7 @@ function getLookupConfig(type, resource, form) {
       endpoint: "/lookups/departments",
       valueField: "value",
       label: (option) => option.label,
+      freeSoloWhenEmpty: true,
     },
     programRef: {
       endpoint: "/lookups/programs",
@@ -182,6 +183,24 @@ function getLookupConfig(type, resource, form) {
     },
     alertTypeRef: {
       endpoint: "/lookups/alertTypes",
+      valueField: "value",
+      label: (option) => option.label,
+      freeSolo: true,
+    },
+    datasetTypeRef: {
+      endpoint: "/lookups/datasetTypes",
+      valueField: "value",
+      label: (option) => option.label,
+      freeSolo: true,
+    },
+    studentStatusRef: {
+      endpoint: "/lookups/studentStatuses",
+      valueField: "value",
+      label: (option) => option.label,
+      freeSolo: true,
+    },
+    gradeRef: {
+      endpoint: "/lookups/grades",
       valueField: "value",
       label: (option) => option.label,
       freeSolo: true,
@@ -379,6 +398,7 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
                           required={required}
                           disabled={Boolean(editing && type === "userRef" && resource === "teachers")}
                           freeSolo={Boolean(config.freeSolo)}
+                          freeSoloWhenEmpty={Boolean(config.freeSoloWhenEmpty)}
                           onChange={(selectedValue, option) => {
                             setForm((current) => {
                               const next = { ...current, [key]: selectedValue };

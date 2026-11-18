@@ -18,10 +18,10 @@ import {
   TextField,
 } from "@mui/material";
 import api from "../../services/api.js";
+import DynamicAutocomplete from "../DynamicAutocomplete.jsx";
 
 export default function AdminStudentsPage() {
   const [students, setStudents] = useState([]);
-  const [courses, setCourses] = useState([]);
   const [pagination, setPagination] = useState({ page: 1, limit: 20, total: 0 });
   const [search, setSearch] = useState("");
   const [course, setCourse] = useState("");
@@ -52,11 +52,6 @@ export default function AdminStudentsPage() {
     return () => window.clearTimeout(timer);
   }, [loadStudents, search]);
 
-  useEffect(() => {
-    api.get("/courses")
-      .then(({ data }) => setCourses(data.data || []))
-      .catch((requestError) => setError(requestError.response?.data?.message || "Unable to load course filters."));
-  }, []);
 
   const loadDetails = async (student) => {
     setDetails({ loading: true });
@@ -80,11 +75,22 @@ export default function AdminStudentsPage() {
       {error && <Alert severity="error" onClose={() => setError("")}>{error}</Alert>}
       <div className="page-heading-row">
         <TextField size="small" label="Search students" value={search} onChange={(event) => setSearch(event.target.value)} />
-        <TextField size="small" label="Department" value={department} onChange={(event) => setDepartment(event.target.value)} />
-        <TextField size="small" select label="Course" value={course} onChange={(event) => setCourse(event.target.value)} sx={{ minWidth: 180 }}>
-          <MenuItem value="">All courses</MenuItem>
-          {courses.map((item) => <MenuItem key={item._id} value={item._id}>{item.courseCode} — {item.courseName}</MenuItem>)}
-        </TextField>
+        <DynamicAutocomplete
+          endpoint="/lookups/departments"
+          label="Department"
+          value={department}
+          valueField="value"
+          getOptionLabel={(option) => option.label}
+          onChange={(value) => setDepartment(value)}
+        />
+        <DynamicAutocomplete
+          endpoint="/lookups/courses"
+          label="Course"
+          value={course}
+          getOptionLabel={(option) => `${option.courseCode} — ${option.courseName}`}
+          onChange={(value) => setCourse(value)}
+          helperText="Leave blank for all courses"
+        />
         <TextField size="small" select label="Performance" value={performance} onChange={(event) => setPerformance(event.target.value)} sx={{ minWidth: 160 }}>
           <MenuItem value="">All levels</MenuItem><MenuItem value="high">High GPA (3+)</MenuItem>
           <MenuItem value="medium">Medium GPA (2.5–3)</MenuItem><MenuItem value="low">Low GPA (&lt;2.5)</MenuItem>

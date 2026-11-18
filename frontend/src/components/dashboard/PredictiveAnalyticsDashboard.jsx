@@ -33,6 +33,7 @@ import {
   YAxis,
 } from "recharts";
 import api from "../../services/api.js";
+import DynamicAutocomplete from "../DynamicAutocomplete.jsx";
 
 const modelTypes = [
   { value: "performance", label: "Student performance" },
@@ -425,8 +426,8 @@ export default function PredictiveAnalyticsDashboard({ user }) {
   const [modelStatus, setModelStatus] = useState({});
   const [modelStatusError, setModelStatusError] = useState("");
   const [predictions, setPredictions] = useState([]);
-  const [students, setStudents] = useState([]);
-  const [courses, setCourses] = useState([]);
+  const [selectedStudent, setSelectedStudent] = useState(null);
+  const [selectedCourse, setSelectedCourse] = useState(null);
   const [academicRecords, setAcademicRecords] = useState([]);
   const [predictionType, setPredictionType] = useState("performance");
   const [studentId, setStudentId] = useState("");
@@ -442,8 +443,6 @@ export default function PredictiveAnalyticsDashboard({ user }) {
     const requests = [api.get("/ml/predictions"), api.get("/ml/status")];
     if (canViewMetrics) requests.push(api.get("/ml/evaluation"));
     if (canGenerate) {
-      requests.push(api.get("/students"));
-      requests.push(api.get("/courses"));
       requests.push(api.get("/performance"));
     }
     const results = await Promise.allSettled(requests);
@@ -470,13 +469,7 @@ export default function PredictiveAnalyticsDashboard({ user }) {
       }
     }
     if (canGenerate) {
-      const studentResult = results[resultIndex++];
-      const courseResult = results[resultIndex++];
       const performanceResult = results[resultIndex];
-      if (studentResult.status === "fulfilled") setStudents(studentResult.value.data.data || []);
-      else setError((current) => current || studentResult.reason.response?.data?.message || "Unable to load authorized student records.");
-      if (courseResult.status === "fulfilled") setCourses(courseResult.value.data.data || []);
-      else setError((current) => current || courseResult.reason.response?.data?.message || "Unable to load authorized courses.");
       if (performanceResult.status === "fulfilled") setAcademicRecords(performanceResult.value.data.data || []);
       else setError((current) => current || performanceResult.reason.response?.data?.message || "Unable to load historical performance.");
     }
@@ -485,8 +478,6 @@ export default function PredictiveAnalyticsDashboard({ user }) {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const selectedStudent = students.find((student) => student._id === studentId);
-  const selectedCourse = courses.find((course) => course._id === courseId);
   const eligiblePerformanceRecords = useMemo(() => academicRecords.filter((record) =>
     String(record.student?._id || record.student) === studentId &&
     String(record.course?._id || record.course) === courseId,
@@ -578,24 +569,35 @@ export default function PredictiveAnalyticsDashboard({ user }) {
             {modelTypes.map((item) => <MenuItem key={item.value} value={item.value}>{item.label}</MenuItem>)}
           </TextField>
           {predictionType !== "course-demand" && (
-            <TextField
-              select label="Student" size="small" value={studentId}
-              onChange={(event) => setStudentId(event.target.value)}
-            >
-              {students.map((student) => (
-                <MenuItem key={student._id} value={student._id}>{student.studentId} · {student.name}</MenuItem>
-              ))}
-            </TextField>
+            <DynamicAutocomplete
+              endpoint="/lookups/students"
+              label="Student"
+              value={studentId}
+              selectedOption={selectedStudent}
+              getOptionLabel={(student) => `${student.studentId} · ${student.name}`}
+              onChange={(value, student) => {
+                setStudentId(value);
+                setSelectedStudent(student);
+                setCourseId("");
+                setSelectedCourse(null);
+              }}
+            />
           )}
           {(predictionType === "performance" || predictionType === "course-demand") && (
-            <TextField
-              select label="Course" size="small" value={courseId}
-              onChange={(event) => setCourseId(event.target.value)}
-            >
-              {courses.map((course) => (
-                <MenuItem key={course._id} value={course._id}>{course.courseCode} · {course.courseName}</MenuItem>
-              ))}
-            </TextField>
+            <DynamicAutocomplete
+              endpoint="/lookups/courses"
+              label="Course"
+              value={courseId}
+              selectedOption={selectedCourse}
+              params={predictionType === "performance"
+                ? { studentId, requirePerformance: "true" }
+                : {}}
+              getOptionLabel={(course) => `${course.courseCode} · ${course.courseName}`}
+              onChange={(value, course) => {
+                setCourseId(value);
+                setSelectedCourse(course);
+              }}
+            />
           )}
           <Button
             variant="contained"

@@ -16,6 +16,7 @@ export default function DynamicAutocomplete({
   required = false,
   disabled = false,
   freeSolo = false,
+  freeSoloWhenEmpty = false,
   helperText,
 }) {
   const [options, setOptions] = useState([]);
@@ -24,6 +25,8 @@ export default function DynamicAutocomplete({
   const [error, setError] = useState("");
   const [hasMore, setHasMore] = useState(false);
   const [page, setPage] = useState(1);
+  const [totalOptions, setTotalOptions] = useState(0);
+  const [hasLoaded, setHasLoaded] = useState(false);
   const requestId = useRef(0);
   const paramsKey = JSON.stringify(params);
   const optionLabel = getOptionLabel || ((option) => String(option?.label || option?.[valueField] || ""));
@@ -48,11 +51,14 @@ export default function DynamicAutocomplete({
         if (!active || request !== requestId.current) return;
         const loadedOptions = data.data || [];
         setOptions(loadedOptions);
+        setTotalOptions(data.pagination?.total || 0);
+        setHasLoaded(true);
         setHasMore((data.pagination?.page || 1) < (data.pagination?.pages || 1));
       } catch (requestError) {
         if (!active || request !== requestId.current) return;
         setOptions([]);
         setHasMore(false);
+        setHasLoaded(true);
         setError(requestError.response?.data?.message || `Unable to load ${label.toLowerCase()} options.`);
       } finally {
         if (active && request === requestId.current) setLoading(false);
@@ -105,13 +111,17 @@ export default function DynamicAutocomplete({
         inputValue={inputValue}
         loading={loading}
         disabled={disabled}
-        freeSolo={freeSolo}
+        freeSolo={freeSolo || (
+          freeSoloWhenEmpty && hasLoaded && totalOptions === 0 && !inputValue && !error
+        )}
         filterOptions={(available) => available}
         getOptionLabel={(option) => typeof option === "string" ? option : optionLabel(option)}
         isOptionEqualToValue={(option, selectedOption) =>
           String(option?.[valueField]) === String(selectedOption?.[valueField])
         }
-        noOptionsText={loading ? "Loading..." : `No ${label.toLowerCase()} found`}
+        noOptionsText={loading ? "Loading..." : freeSoloWhenEmpty && totalOptions === 0
+          ? `No ${label.toLowerCase()} records yet`
+          : `No ${label.toLowerCase()} found`}
         onInputChange={(_, nextInput, reason) => {
           if (reason === "input" || reason === "clear" || reason === "reset") setInputValue(nextInput);
         }}
@@ -136,7 +146,11 @@ export default function DynamicAutocomplete({
             label={label}
             required={required}
             error={Boolean(error)}
-            helperText={error || helperText}
+            helperText={error || (
+              freeSoloWhenEmpty && hasLoaded && totalOptions === 0 && !inputValue
+                ? `No existing ${label.toLowerCase()} records; enter the first value.`
+                : helperText
+            )}
             InputProps={{
               ...autocompleteParams.InputProps,
               endAdornment: (

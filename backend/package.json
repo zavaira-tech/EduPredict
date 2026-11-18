@@ -7,7 +7,7 @@
     "dev": "nodemon src/index.js",
     "start": "node src/index.js",
     "seed:admin": "node src/seedAdmin.js",
-    "test": "node --test ../tests/analytics.test.mjs ../tests/ml-service.test.mjs ../tests/guest-auth.test.mjs"
+    "test": "node --test ../tests/analytics.test.mjs ../tests/ml-service.test.mjs ../tests/guest-auth.test.mjs ../tests/lookup-options.test.mjs"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

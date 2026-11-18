@@ -27,6 +27,7 @@ import {
   YAxis,
 } from "recharts";
 import api from "../../services/api.js";
+import DynamicAutocomplete from "../DynamicAutocomplete.jsx";
 
 function ChartPanel({ title, children }) {
   return (
@@ -75,7 +76,6 @@ export default function AnalyticsDashboard({ user }) {
   });
   const [search, setSearch] = useState("");
   const [analytics, setAnalytics] = useState(emptyAnalytics);
-  const [courseOptions, setCourseOptions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -124,7 +124,6 @@ export default function AnalyticsDashboard({ user }) {
         anomalies: canManageAnomalies ? results[10].data.data : { anomalies: [] },
       };
       setAnalytics(next);
-      setCourseOptions(next.courses);
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to load analytics from academic records.");
     } finally {
@@ -211,15 +210,38 @@ export default function AnalyticsDashboard({ user }) {
         <TextField label="From" type="date" size="small" value={filters.from} InputLabelProps={{ shrink: true }} onChange={(event) => setFilters({ ...filters, from: event.target.value })} />
         <TextField label="To" type="date" size="small" value={filters.to} InputLabelProps={{ shrink: true }} onChange={(event) => setFilters({ ...filters, to: event.target.value })} />
         <TextField label="Academic year" size="small" value={filters.academicYear} onChange={(event) => setFilters({ ...filters, academicYear: event.target.value })} />
-        <TextField label="Semester" select size="small" value={filters.semester} onChange={(event) => setFilters({ ...filters, semester: event.target.value })}>
+        <TextField label="Semester" select size="small" value={filters.semester} onChange={(event) => setFilters({ ...filters, semester: event.target.value, course: "" })}>
           <MenuItem value="">All semesters</MenuItem>
-          {Array.from({ length: 12 }, (_, index) => <MenuItem key={index + 1} value={index + 1}>{index + 1}</MenuItem>)}
+          {Array.from({ length: 8 }, (_, index) => <MenuItem key={index + 1} value={index + 1}>{`Semester ${index + 1}`}</MenuItem>)}
         </TextField>
-        <TextField label="Department" size="small" value={filters.department} onChange={(event) => setFilters({ ...filters, department: event.target.value })} />
-        <TextField label="Course" select size="small" value={filters.course} onChange={(event) => setFilters({ ...filters, course: event.target.value })}>
-          <MenuItem value="">All courses</MenuItem>
-          {courseOptions.map((course) => <MenuItem key={course.courseId} value={course.courseId}>{course.courseCode} · {course.courseName}</MenuItem>)}
-        </TextField>
+        <DynamicAutocomplete
+          endpoint="/lookups/academicYears"
+          label="Academic year"
+          value={filters.academicYear}
+          valueField="value"
+          getOptionLabel={(option) => option.label}
+          onChange={(value) => setFilters((current) => ({ ...current, academicYear: value }))}
+        />
+        <DynamicAutocomplete
+          endpoint="/lookups/departments"
+          label="Department"
+          value={filters.department}
+          valueField="value"
+          getOptionLabel={(option) => option.label}
+          onChange={(value) => setFilters((current) => ({ ...current, department: value, course: "" }))}
+        />
+        <DynamicAutocomplete
+          endpoint="/lookups/courses"
+          label="Course"
+          value={filters.course}
+          params={{
+            ...(filters.department ? { department: filters.department } : {}),
+            ...(filters.semester ? { semester: filters.semester } : {}),
+          }}
+          getOptionLabel={(option) => `${option.courseCode} · ${option.courseName}`}
+          onChange={(value) => setFilters((current) => ({ ...current, course: value }))}
+          helperText="Leave blank for all courses"
+        />
         <Button variant="contained" disabled={refreshing} onClick={loadAnalytics}>{refreshing ? "Updating…" : "Update"}</Button>
       </Paper>
 
