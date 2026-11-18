@@ -81,12 +81,16 @@ export default function AdminStudentsPage() {
           value={department}
           valueField="value"
           getOptionLabel={(option) => option.label}
-          onChange={(value) => setDepartment(value)}
+          onChange={(value) => {
+            setDepartment(value);
+            setCourse("");
+          }}
         />
         <DynamicAutocomplete
           endpoint="/lookups/courses"
           label="Course"
           value={course}
+          params={department ? { department } : {}}
           getOptionLabel={(option) => `${option.courseCode} — ${option.courseName}`}
           onChange={(value) => setCourse(value)}
           helperText="Leave blank for all courses"

@@ -107,7 +107,7 @@ async function validateEntityReferences(
   modelName,
   fields,
   recordId,
-  { requireActiveTeacher = false, requireKnownDepartment = false } = {},
+  { requireActiveTeacher = false, requireKnownDepartment = false, requireActiveUser = false } = {},
 ) {
   if (["attendance", "performance"].includes(modelName)) {
     if (
@@ -134,7 +134,9 @@ async function validateEntityReferences(
       }),
     ]);
     if (!user) return `The linked user account must have the ${expectedRole} role.`;
-    if (!recordId && user.isActive === false) return "The linked user account must be active.";
+    if ((!recordId || requireActiveUser) && user.isActive === false) {
+      return "The linked user account must be active.";
+    }
     if (existingProfile) return "This user account is already linked to a profile.";
   }
   if (requireKnownDepartment && ["students", "teachers", "courses"].includes(modelName)) {
@@ -331,14 +333,23 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
   ) {
     let values;
     if (type === "departments") {
-      const [studentDepartments, teacherDepartments, courseDepartments] = await Promise.all([
-        Student.distinct("department"),
-        Teacher.distinct("department"),
-        Course.distinct("department"),
-      ]);
-      values = [...new Set([...studentDepartments, ...teacherDepartments, ...courseDepartments]
-        .filter((value) => typeof value === "string" && value.trim())
-        .map((value) => value.trim()))];
+      if (["admin", "analyst"].includes(req.user.role)) {
+        const [studentDepartments, teacherDepartments, courseDepartments] = await Promise.all([
+          Student.distinct("department"),
+          Teacher.distinct("department"),
+          Course.distinct("department"),
+        ]);
+        values = [...studentDepartments, ...teacherDepartments, ...courseDepartments];
+      } else {
+        const [studentDepartments, courseDepartments] = await Promise.all([
+          Student.distinct("department", await scopedFilter(req, "students")),
+          Course.distinct("department", await scopedFilter(req, "courses")),
+        ]);
+        const teacherProfile = req.user.role === "teacher"
+          ? await Teacher.findOne({ user: req.user._id }).select("department").lean()
+          : null;
+        values = [...studentDepartments, ...courseDepartments, teacherProfile?.department];
+      }
     } else if (type === "programs") {
       values = await Student.distinct("program", {
         ...(typeof req.query.department === "string" && req.query.department.trim()
@@ -382,10 +393,19 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
         ]);
         values = [...enrollmentYears, ...attendanceYears, ...performanceYears];
       } else {
+        const yearFilter = {};
+        if (req.user.role === "teacher") {
+          const courseFilter = await scopedFilter(req, "courses");
+          const courseIds = await Course.find(courseFilter).distinct("_id");
+          yearFilter.course = { $in: courseIds };
+        } else if (req.user.role === "student") {
+          const student = await Student.findOne({ user: req.user._id }).select("_id").lean();
+          yearFilter.student = student?._id || null;
+        }
         const [enrollmentYears, attendanceYears, performanceYears] = await Promise.all([
-          Enrollment.distinct("academicYear"),
-          Attendance.distinct("academicYear"),
-          Performance.distinct("academicYear"),
+          Enrollment.distinct("academicYear", yearFilter),
+          Attendance.distinct("academicYear", yearFilter),
+          Performance.distinct("academicYear", yearFilter),
         ]);
         values = [...enrollmentYears, ...attendanceYears, ...performanceYears];
       }
@@ -811,6 +831,10 @@ export function updateEntity(modelName) {
           ["students", "teachers", "courses"].includes(modelName) &&
           changes.department !== undefined &&
           String(changes.department || "").trim() !== String(record.department || "").trim(),
+        requireActiveUser:
+          modelName === "students" &&
+          changes.user !== undefined &&
+          String(changes.user || "") !== String(record.user || ""),
       },
     );
     if (referenceError) {
