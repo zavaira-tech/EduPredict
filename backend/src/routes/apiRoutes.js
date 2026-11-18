@@ -4,6 +4,7 @@ import {
   deleteEntity,
   getAvailableTeacherUsers,
   getEntity,
+  listLookupOptions,
   listEntities,
   markAlertRead,
   updateEntity,
@@ -82,6 +83,11 @@ defineResource("students", "students", {
   remove: ["admin"],
 });
 router.get("/teachers/available-users", allowRoles("admin"), getAvailableTeacherUsers);
+router.get(
+  "/lookups/:type",
+  allowRoles("admin", "teacher", "student", "analyst"),
+  listLookupOptions,
+);
 defineResource("teachers", "teachers", {
   read: ["admin", "teacher"],
   create: ["admin"],

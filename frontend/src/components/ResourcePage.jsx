@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Autocomplete,
   Alert,
   Box,
   Button,
@@ -19,30 +18,31 @@ import {
   TextField,
 } from "@mui/material";
 import api from "../services/api.js";
+import DynamicAutocomplete from "./DynamicAutocomplete.jsx";
 
 const definitions = {
   students: {
     title: "Students", fields: [
       ["studentId", "Student ID", "text", true], ["name", "Name", "text", true],
-      ["email", "Email", "email", true], ["department", "Department", "text", true],
-      ["program", "Program", "text", true], ["semester", "Semester", "number", true],
-      ["user", "User account ID"], ["gender", "Gender"], ["age", "Age", "number"], ["attendancePercentage", "Attendance %", "number"],
+      ["email", "Email", "email", true], ["department", "Department", "departmentRef", true],
+      ["program", "Program", "programRef", true], ["semester", "Semester", "semester", true],
+      ["user", "User account", "userRef"], ["gender", "Gender"], ["age", "Age", "number"], ["attendancePercentage", "Attendance %", "number"],
       ["gpa", "GPA", "number"], ["academicStatus", "Academic status"],
     ], actions: ["add", "edit", "delete"], columns: ["studentId", "name", "email", "department", "program", "semester", "gpa"],
   },
   teachers: {
     title: "Teachers", fields: [
-      ["user", "User Account ID", "teacherUserRef", true],
+      ["user", "User account", "userRef", true],
       ["name", "Name", "text", true, { readOnly: true }],
       ["email", "Email", "email", true, { readOnly: true }],
-      ["department", "Department", "text", true],
+      ["department", "Department", "departmentRef", true],
       ["specialization", "Specialization", "text", false],
     ], actions: ["add", "edit", "delete"], columns: ["teacherId", "name", "email", "department", "specialization"],
   },
   courses: {
     title: "Courses", fields: [
       ["courseCode", "Course code", "text", true], ["courseName", "Course name", "text", true],
-      ["department", "Department", "text", true], ["credits", "Credits", "credits", true],
+      ["department", "Department", "departmentRef", true], ["credits", "Credits", "credits", true],
       ["teacher", "Teacher", "teacherRef"], ["semester", "Semester", "semester", true],
     ], actions: ["add", "edit", "delete"], columns: ["courseCode", "courseName", "department", "credits", "semester"],
   },
@@ -50,8 +50,8 @@ const definitions = {
     title: "Enrollments", fields: [
       ["student", "Student", "studentRef", true],
       ["course", "Course", "courseRef", true],
-      ["academicYear", "Academic year", "text", true],
-      ["semester", "Semester", "number", true],
+      ["academicYear", "Academic year", "academicYearRef", true],
+      ["semester", "Semester", "semester", true],
       ["enrolledAt", "Enrollment date", "date"],
       ["status", "Status", "select", true, ["active", "completed", "dropped"]],
     ], actions: ["add", "edit", "delete"],
@@ -59,22 +59,25 @@ const definitions = {
   },
   attendance: {
     title: "Attendance", fields: [
-      ["student", "Student record ID", "text", true], ["course", "Course record ID", "text", true],
+      ["student", "Student", "studentRef", true], ["course", "Course", "courseRef", true],
+      ["academicYear", "Academic year", "academicYearRef"],
+      ["semester", "Semester", "semester", true],
       ["date", "Date", "date", true], ["status", "Status", "select", true, ["Present", "Absent", "Late"]],
       ["percentage", "Percentage", "number"],
     ], actions: ["add", "edit"], columns: ["student", "course", "date", "status", "percentage"],
   },
   performance: {
     title: "Academic performance", fields: [
-      ["student", "Student record ID", "text", true], ["course", "Course record ID", "text", true],
+      ["student", "Student", "studentRef", true], ["course", "Course", "courseRef", true],
+      ["academicYear", "Academic year", "academicYearRef"],
       ["assignmentScore", "Assignment score", "number"], ["quizScore", "Quiz score", "number"],
       ["midtermScore", "Midterm score", "number"], ["finalScore", "Final score", "number"],
-      ["totalScore", "Total score", "number"], ["grade", "Grade"], ["gpa", "GPA", "number"], ["semester", "Semester", "number"],
+      ["totalScore", "Total score", "number"], ["grade", "Grade"], ["gpa", "GPA", "number"], ["semester", "Semester", "semester"],
     ], actions: ["add", "edit"], columns: ["student", "course", "totalScore", "grade", "gpa", "semester"],
   },
   predictions: {
     title: "Predictions", fields: [
-      ["student", "Student record ID", "text", true],
+      ["student", "Student", "studentRef", true],
       ["predictionType", "Prediction type", "select", true, ["performance", "dropout", "courseDemand"]],
       ["prediction", "Prediction", "text", true], ["probability", "Probability (0-1)", "number", true],
       ["riskLevel", "Risk level"], ["recommendation", "Recommendation", "textarea"],
@@ -89,8 +92,8 @@ const definitions = {
   alerts: {
     title: "Alerts", fields: [
       ["title", "Title", "text", true], ["message", "Message", "textarea", true],
-      ["type", "Type", "text", true], ["priority", "Priority", "select", true, ["low", "medium", "high", "critical"]],
-      ["student", "Student record ID"],
+      ["type", "Type", "alertTypeRef", true], ["priority", "Priority", "select", true, ["low", "medium", "high", "critical"]],
+      ["student", "Student", "studentRef"],
     ], actions: ["add", "read"], columns: ["title", "type", "priority", "isRead", "createdAt"],
   },
   support: {
@@ -122,6 +125,71 @@ const singularLabels = {
   support: "ticket",
 };
 
+function getLookupConfig(type, resource, form) {
+  const config = {
+    userRef: {
+      endpoint: "/lookups/users",
+      params: {
+        role: resource === "teachers" ? "teacher" : "student",
+        unassigned: "true",
+      },
+      label: (option) => `${option.name} (${option.email})`,
+    },
+    studentRef: {
+      endpoint: "/lookups/students",
+      params: form.course ? { courseId: form.course } : {},
+      label: (option) => `${option.studentId} — ${option.name}`,
+    },
+    courseRef: {
+      endpoint: "/lookups/courses",
+      params: {
+        ...(form.student ? { studentId: form.student } : {}),
+        ...(form.semester ? { semester: form.semester } : {}),
+        ...(form.department ? { department: form.department } : {}),
+        ...(["attendance", "performance"].includes(resource) ? { requireEnrollment: "true" } : {}),
+      },
+      label: (option) => {
+        const teacher = option.teacher?.name ? ` · ${option.teacher.name}` : "";
+        return `${option.courseCode} — ${option.courseName}${teacher}`;
+      },
+    },
+    teacherRef: {
+      endpoint: "/lookups/teachers",
+      params: form.department ? { department: form.department } : {},
+      label: (option) => `${option.teacherId} — ${option.name}`,
+    },
+    departmentRef: {
+      endpoint: "/lookups/departments",
+      valueField: "value",
+      label: (option) => option.label,
+    },
+    programRef: {
+      endpoint: "/lookups/programs",
+      valueField: "value",
+      params: form.department ? { department: form.department } : {},
+      label: (option) => option.label,
+      freeSolo: true,
+    },
+    academicYearRef: {
+      endpoint: "/lookups/academicYears",
+      valueField: "value",
+      params: {
+        ...(form.student ? { studentId: form.student } : {}),
+        ...(form.course ? { courseId: form.course } : {}),
+      },
+      label: (option) => option.label,
+      freeSolo: true,
+    },
+    alertTypeRef: {
+      endpoint: "/lookups/alertTypes",
+      valueField: "value",
+      label: (option) => option.label,
+      freeSolo: true,
+    },
+  };
+  return config[type];
+}
+
 function display(value) {
   if (value == null || value === "") return "—";
   if (typeof value === "object") return value.name || value._id || JSON.stringify(value);
@@ -136,10 +204,6 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
-  const [referenceOptions, setReferenceOptions] = useState({ students: [], courses: [], teachers: [] });
-  const [teacherOptionsLoading, setTeacherOptionsLoading] = useState(false);
-  const [teacherOptionsError, setTeacherOptionsError] = useState("");
-  const [availableTeacherUsers, setAvailableTeacherUsers] = useState([]);
   const canCreate = role === "admin" ||
     (role === "analyst" && resource === "datasets") ||
     (role === "teacher" && ["attendance", "performance", "support"].includes(resource)) ||
@@ -149,42 +213,18 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
   const canEditAcademic = role === "teacher" && ["attendance", "performance"].includes(resource);
   const canEditSupport = resource === "support";
 
-  const loadAvailableTeacherUsers = useCallback(async (currentUserId = "") => {
-    try {
-      const { data } = await api.get("/teachers/available-users", {
-        params: currentUserId ? { includeUserId: currentUserId } : {},
-      });
-      setAvailableTeacherUsers(data.data || []);
-    } catch {
-      setAvailableTeacherUsers([]);
-    }
-  }, []);
-
   const loadRecords = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
       const { data } = await api.get(`/${resource}`);
       setRecords(data.data || []);
-      if (resource === "enrollments" && role === "admin") {
-        const [studentsResponse, coursesResponse] = await Promise.all([
-          api.get("/students"),
-          api.get("/courses"),
-        ]);
-        setReferenceOptions({
-          students: studentsResponse.data.data || [],
-          courses: coursesResponse.data.data || [],
-        });
-      }
-      if (resource === "teachers" && role === "admin") {
-        await loadAvailableTeacherUsers();
-      }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to load records from the API.");
     } finally {
       setLoading(false);
     }
-  }, [loadAvailableTeacherUsers, resource, role]);
+  }, [resource]);
 
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
@@ -193,35 +233,13 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
     return records.filter((record) => !query || Object.values(record).some((value) => display(value).toLowerCase().includes(query)));
   }, [records, search]);
 
-  const openForm = async (record = null) => {
+  const openForm = (record = null) => {
     setEditing(record);
-    if (resource === "courses") {
-      setTeacherOptionsLoading(true);
-      setTeacherOptionsError("");
-      setReferenceOptions((current) => ({ ...current, teachers: [] }));
-    }
-    if (resource === "teachers" && role === "admin") {
-      const currentUserId = record?.user?._id || record?.user || "";
-      await loadAvailableTeacherUsers(currentUserId);
-    }
     setForm(record ? Object.fromEntries(definition.fields.filter(([key]) => !(resource === "users" && key === "password")).map(([key]) => {
       const value = record[key];
       return [key, value && typeof value === "object" ? value._id || "" : value ?? ""];
     })) : {});
     setDialogOpen(true);
-    if (resource === "courses") {
-      api.get("/teachers")
-        .then(({ data }) => {
-          setReferenceOptions((current) => ({
-            ...current,
-            teachers: (data.data || []).filter((teacher) => teacher.user && teacher.user.isActive !== false),
-          }));
-        })
-        .catch((requestError) => {
-          setTeacherOptionsError(requestError.response?.data?.message || "Unable to load active teachers.");
-        })
-        .finally(() => setTeacherOptionsLoading(false));
-    }
   };
 
   const submitForm = async (event) => {
@@ -341,66 +359,50 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
                           </MenuItem>
                         ))}
                     </TextField>
-                  ) : type === "teacherRef" ? (
-                    <div key={key}>
-                      {teacherOptionsError && <Alert severity="error">{teacherOptionsError}</Alert>}
-                      {!teacherOptionsLoading && !teacherOptionsError && referenceOptions.teachers.length === 0 && (
-                        <Alert severity="info">No active teacher records are available.</Alert>
-                      )}
-                      <Autocomplete
-                        options={referenceOptions.teachers}
-                        loading={teacherOptionsLoading}
-                        value={referenceOptions.teachers.find((item) => item._id === form[key]) || null}
-                        getOptionLabel={(item) => `${item.teacherId} — ${item.name}`}
-                        isOptionEqualToValue={(option, value) => option._id === value._id}
-                        noOptionsText={teacherOptionsLoading ? "Loading teachers..." : "No active teachers found"}
-                        onChange={(_, item) => setForm({ ...form, [key]: item?._id || "" })}
-                        renderInput={(params) => (
-                          <TextField {...params} label={label} error={Boolean(teacherOptionsError)} />
-                        )}
-                      />
-                    </div>
-                  ) : type === "teacherUserRef" ? (
-                    <Autocomplete
-                      key={key}
-                      options={availableTeacherUsers}
-                      disabled={Boolean(editing)}
-                      value={availableTeacherUsers.find((item) => item._id === form[key]) || null}
-                      getOptionLabel={(item) => (item ? `${item.name} (${item.email})` : "")}
-                      isOptionEqualToValue={(option, val) => option._id === (val?._id || val)}
-                      onChange={(_, item) => {
-                        setForm((prev) => ({
-                          ...prev,
-                          [key]: item?._id || "",
-                          name: item?.name || "",
-                          email: item?.email || "",
-                        }));
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
+                  ) : getLookupConfig(type, resource, form) ? (
+                    (() => {
+                      const config = getLookupConfig(type, resource, form);
+                      const savedOption = editing?.[key];
+                      const selectedOption = config.valueField === "value" && typeof savedOption === "string"
+                        ? { value: savedOption, label: savedOption }
+                        : savedOption;
+                      return (
+                        <DynamicAutocomplete
+                          key={key}
+                          endpoint={config.endpoint}
                           label={label}
+                          value={form[key] ?? ""}
+                          valueField={config.valueField || "_id"}
+                          getOptionLabel={config.label}
+                          params={config.params || {}}
+                          selectedOption={selectedOption}
                           required={required}
-                          helperText={
-                            !editing && availableTeacherUsers.length === 0
-                              ? "No unassigned teacher accounts found in MongoDB. Create a teacher user in Users first."
-                              : "Select a teacher user account from MongoDB"
-                          }
-                          error={!editing && availableTeacherUsers.length === 0}
+                          disabled={Boolean(editing && type === "userRef" && resource === "teachers")}
+                          freeSolo={Boolean(config.freeSolo)}
+                          onChange={(selectedValue, option) => {
+                            setForm((current) => {
+                              const next = { ...current, [key]: selectedValue };
+                              if (key === "user" && option && typeof option === "object") {
+                                next.name = option.name || next.name;
+                                next.email = option.email || next.email;
+                              }
+                              if (key === "department") {
+                                next.program = "";
+                                next.teacher = "";
+                                next.course = "";
+                              }
+                              if (key === "semester") next.course = "";
+                              if (key === "student") {
+                                next.course = "";
+                                next.academicYear = "";
+                              }
+                              if (key === "course") next.academicYear = "";
+                              return next;
+                            });
+                          }}
                         />
-                      )}
-                    />
-                  ) : type === "studentRef" || type === "courseRef" ? (
-                    <Autocomplete
-                      key={key}
-                      options={referenceOptions[type === "studentRef" ? "students" : "courses"]}
-                      value={referenceOptions[type === "studentRef" ? "students" : "courses"].find((item) => item._id === form[key]) || null}
-                      getOptionLabel={(item) => type === "studentRef"
-                        ? `${item.studentId} — ${item.name}`
-                        : `${item.courseCode} — ${item.courseName}`}
-                      onChange={(_, item) => setForm({ ...form, [key]: item?._id || "" })}
-                      renderInput={(params) => <TextField {...params} label={label} required={required} />}
-                    />
+                      );
+                    })()
                   ) : (
                     <TextField
                       key={key}

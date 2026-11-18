@@ -12,7 +12,6 @@ const teacherSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true,
       alias: "userId",
     },
     name: {
@@ -44,9 +43,6 @@ const teacherSchema = new mongoose.Schema(
     toObject: { virtuals: true },
   },
 );
-
-// Unique index to prevent duplicate teacherId
-teacherSchema.index({ teacherId: 1 }, { unique: true });
 
 // Unique constraint to prevent multiple teacher profiles for one user account
 teacherSchema.index({ user: 1 }, { unique: true, sparse: true });
