@@ -1,4 +1,3 @@
-import mongoose from "mongoose";
 import ActivityLog from "../models/ActivityLog.js";
 import Alert from "../models/Alert.js";
 import Attendance from "../models/Attendance.js";
@@ -686,4 +685,3 @@ export const listAdminActivity = asyncHandler(async (req, res) => {
   res.json({ success: true, data: activity, pagination: { page, limit, total, pages: Math.ceil(total / limit) } });
 });
 
-export const validateAdminObjectId = (id) => mongoose.isValidObjectId(id);

@@ -150,6 +150,30 @@ async function inferAcademicPeriod(modelName, fields) {
   if (!fields.semester) fields.semester = enrollment.semester;
 }
 
+export const getAvailableTeacherUsers = asyncHandler(async (req, res) => {
+  const assignedUserIds = await Teacher.distinct("user", { user: { $ne: null } });
+  const filter = {
+    role: "teacher",
+    _id: { $nin: assignedUserIds },
+  };
+
+  const includeUserId = req.query.includeUserId;
+  if (includeUserId && isValidId(includeUserId)) {
+    filter.$or = [
+      { role: "teacher", _id: { $nin: assignedUserIds } },
+      { _id: includeUserId, role: "teacher" },
+    ];
+    delete filter._id;
+  }
+
+  const users = await User.find(filter)
+    .select("_id name email role")
+    .sort({ name: 1 })
+    .lean();
+
+  res.json({ success: true, data: users });
+});
+
 export function listEntities(modelName) {
   return asyncHandler(async (req, res) => {
     const Model = models[modelName];
@@ -163,6 +187,9 @@ export function listEntities(modelName) {
     let query = Model.find(filter).sort({ createdAt: -1 }).limit(200);
     if (req.user.role === "student" && modelName === "courses") {
       query = query.select("-enrolledStudents");
+    }
+    if (modelName === "teachers") {
+      query = query.populate("user", "name email role isActive");
     }
     const records = await query;
     res.json({ success: true, data: records });
@@ -179,6 +206,9 @@ export function getEntity(modelName) {
     if (req.user.role === "student" && modelName === "courses") {
       query = query.select("-enrolledStudents");
     }
+    if (modelName === "teachers") {
+      query = query.populate("user", "name email role isActive");
+    }
     const record = await query;
     if (!record) return res.status(404).json({ success: false, message: "Record not found." });
     res.json({ success: true, data: record });
@@ -188,6 +218,59 @@ export function getEntity(modelName) {
 export function createEntity(modelName) {
   return asyncHandler(async (req, res) => {
     const body = { ...req.body };
+
+    if (modelName === "teachers") {
+      const selectedUserId = body.user || body.userId;
+      if (!selectedUserId || !isValidId(selectedUserId)) {
+        return res.status(400).json({ success: false, message: "A valid teacher user account is required." });
+      }
+      body.user = selectedUserId;
+      body.userId = selectedUserId;
+
+      const user = await User.findById(selectedUserId).select("name email role isActive");
+      if (!user) {
+        return res.status(404).json({ success: false, message: "The selected user account does not exist." });
+      }
+      if (user.role !== "teacher") {
+        return res.status(400).json({ success: false, message: "The selected user account must have the teacher role." });
+      }
+
+      const existingProfile = await Teacher.findOne({ user: selectedUserId });
+      if (existingProfile) {
+        return res.status(400).json({ success: false, message: "This user account is already linked to a teacher profile." });
+      }
+
+      if (!body.department || typeof body.department !== "string" || !body.department.trim()) {
+        return res.status(400).json({ success: false, message: "Department is required." });
+      }
+
+      body.name = user.name;
+      body.email = user.email;
+      body.department = body.department.trim();
+      body.specialization = body.specialization ? String(body.specialization).trim() : "";
+
+      // Ensure server securely generates Teacher ID, preventing manual tampering
+      delete body.teacherId;
+      body.teacherId = await Teacher.generateNextTeacherId();
+
+      try {
+        const record = await Teacher.create(body);
+        return res.status(201).json({ success: true, data: record });
+      } catch (err) {
+        if (err?.code === 11000) {
+          if (err.keyPattern?.user || err.message?.includes("user")) {
+            return res.status(400).json({ success: false, message: "This user account already has a teacher profile." });
+          }
+          if (err.keyPattern?.teacherId || err.message?.includes("teacherId")) {
+            body.teacherId = await Teacher.generateNextTeacherId();
+            const retryRecord = await Teacher.create(body);
+            return res.status(201).json({ success: true, data: retryRecord });
+          }
+        }
+        throw err;
+      }
+    }
+
     const referenceError = await validateEntityReferences(modelName, body);
     if (referenceError) {
       return res.status(400).json({ success: false, message: referenceError });
@@ -228,7 +311,18 @@ export function updateEntity(modelName) {
     delete changes._id;
     delete changes.__v;
     delete changes.user;
+    delete changes.userId;
     delete changes.uploadedBy;
+    if (modelName === "teachers") {
+      delete changes.teacherId;
+      delete changes.name;
+      delete changes.email;
+      if (changes.department !== undefined && (!changes.department || typeof changes.department !== "string" || !changes.department.trim())) {
+        return res.status(400).json({ success: false, message: "Department is required." });
+      }
+      if (changes.department) changes.department = changes.department.trim();
+      if (changes.specialization !== undefined) changes.specialization = String(changes.specialization).trim();
+    }
     if (modelName === "courses") delete changes.enrolledStudents;
     if (req.user.role === "teacher") {
       delete changes.student;

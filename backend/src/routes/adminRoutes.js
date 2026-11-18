@@ -22,6 +22,7 @@ import {
   uploadAdminDataset,
 } from "../controllers/adminController.js";
 import { authorizeRoles } from "../middleware/roleMiddleware.js";
+import { getAvailableTeacherUsers } from "../controllers/entityController.js";
 
 const router = Router();
 const allowedExtensions = new Set([".csv", ".tsv", ".json", ".xls", ".xlsx"]);
@@ -64,6 +65,7 @@ router.put("/users/:id", updateAdminUser);
 router.patch("/users/:id/status", setAdminUserStatus);
 router.delete("/users/:id", deleteAdminUser);
 
+router.get("/teachers/available-users", getAvailableTeacherUsers);
 router.get("/teachers", listAdminTeachers);
 router.get("/analysts", listAdminAnalysts);
 router.get("/students", listAdminStudents);

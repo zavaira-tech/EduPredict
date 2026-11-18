@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   createEntity,
   deleteEntity,
+  getAvailableTeacherUsers,
   getEntity,
   listEntities,
   markAlertRead,
@@ -38,6 +39,7 @@ import { authenticateRegistered } from "../middleware/authMiddleware.js";
 import requireDatabase from "../middleware/requireDatabase.js";
 import { authorizeRoles as allowRoles } from "../middleware/roleMiddleware.js";
 import adminRouter from "./adminRoutes.js";
+import { createNotification, recordActivity } from "../services/adminAudit.js";
 import mlRouter from "./mlRoutes.js";
 
 const router = Router();
@@ -79,6 +81,7 @@ defineResource("students", "students", {
   update: ["admin"],
   remove: ["admin"],
 });
+router.get("/teachers/available-users", allowRoles("admin"), getAvailableTeacherUsers);
 defineResource("teachers", "teachers", {
   read: ["admin", "teacher"],
   create: ["admin"],
@@ -179,6 +182,17 @@ router.post(
       });
     }
     const user = await User.create({ name: name.trim(), email: email.trim().toLowerCase(), password, role });
+    await Promise.all([
+      recordActivity({ actor: req.user, action: "user.created", entityType: "User", entityId: user._id, details: { role } }),
+      createNotification({
+        title: "User account created",
+        message: `${user.name} was added as a ${role}.`,
+        type: "user",
+        entityType: "User",
+        entityId: user._id,
+        actor: req.user,
+      }),
+    ]);
     res.status(201).json({
       success: true,
       data: { id: user._id, name: user.name, email: user.email, role: user.role },
@@ -239,6 +253,13 @@ router.put(
     }
     if (invalidateTokens) user.tokenVersion = (user.tokenVersion ?? 0) + 1;
     await user.save();
+    await recordActivity({
+      actor: req.user,
+      action: "user.updated",
+      entityType: "User",
+      entityId: user._id,
+      details: { roleChanged: role !== undefined, passwordReset: password !== undefined },
+    });
     res.json({ success: true, data: user });
   }),
 );
@@ -254,15 +275,22 @@ router.put(
     if (user._id.equals(req.user._id) && req.body.role !== "admin") {
       return res.status(400).json({ success: false, message: "You cannot remove your own administrator role." });
     }
-    if (user.role === "admin" && req.body.role !== "admin") {
-      const admins = await User.countDocuments({ role: "admin" });
+    if (user.role === "admin" && user.isActive !== false && req.body.role !== "admin") {
+      const admins = await User.countDocuments({ role: "admin", isActive: { $ne: false } });
       if (admins <= 1) {
-        return res.status(400).json({ success: false, message: "The last administrator cannot be demoted." });
+        return res.status(400).json({ success: false, message: "The last active administrator cannot be demoted." });
       }
     }
     user.role = req.body.role;
     user.tokenVersion = (user.tokenVersion ?? 0) + 1;
     await user.save();
+    await recordActivity({
+      actor: req.user,
+      action: "user.role_changed",
+      entityType: "User",
+      entityId: user._id,
+      details: { role: user.role },
+    });
     res.json({ success: true, data: user });
   }),
 );
@@ -276,11 +304,22 @@ router.delete(
     if (req.params.id === req.user._id.toString()) {
       return res.status(400).json({ success: false, message: "You cannot delete your own account." });
     }
-    const user = await User.findById(req.params.id).select("role");
+    const user = await User.findById(req.params.id).select("name role isActive");
     if (!user) return res.status(404).json({ success: false, message: "User not found." });
-    if (user.role === "admin" && (await User.countDocuments({ role: "admin" })) <= 1) {
-      return res.status(400).json({ success: false, message: "The last administrator cannot be deleted." });
+    if (
+      user.role === "admin" &&
+      user.isActive !== false &&
+      (await User.countDocuments({ role: "admin", isActive: { $ne: false } })) <= 1
+    ) {
+      return res.status(400).json({ success: false, message: "The last active administrator cannot be deleted." });
     }
+    await recordActivity({
+      actor: req.user,
+      action: "user.deleted",
+      entityType: "User",
+      entityId: user._id,
+      details: { name: user.name, role: user.role },
+    });
     await user.deleteOne();
     res.json({ success: true, message: "User deleted." });
   }),

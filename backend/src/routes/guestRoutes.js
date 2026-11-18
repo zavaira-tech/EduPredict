@@ -15,7 +15,7 @@ import {
 const router = Router();
 
 // Guest routes allow public or authenticated guest and registered sessions
-router.use(authenticate);
+// router.use(authenticate); // Guest routes are public and do not require authentication
 
 /**
  * GET /api/guest/dashboard
