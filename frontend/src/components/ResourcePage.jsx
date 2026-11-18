@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Autocomplete,
   Alert,
+  Box,
   Button,
   CircularProgress,
   Dialog,
@@ -31,16 +32,18 @@ const definitions = {
   },
   teachers: {
     title: "Teachers", fields: [
-      ["teacherId", "Teacher ID", "text", true], ["name", "Name", "text", true],
-      ["email", "Email", "email", true], ["department", "Department", "text", true], ["specialization", "Specialization"],
-      ["user", "User account ID"],
+      ["user", "User Account ID", "teacherUserRef", true],
+      ["name", "Name", "text", true, { readOnly: true }],
+      ["email", "Email", "email", true, { readOnly: true }],
+      ["department", "Department", "text", true],
+      ["specialization", "Specialization", "text", false],
     ], actions: ["add", "edit", "delete"], columns: ["teacherId", "name", "email", "department", "specialization"],
   },
   courses: {
     title: "Courses", fields: [
       ["courseCode", "Course code", "text", true], ["courseName", "Course name", "text", true],
-      ["department", "Department", "text", true], ["credits", "Credits", "number", true],
-      ["teacher", "Teacher record ID"], ["semester", "Semester", "number", true],
+      ["department", "Department", "text", true], ["credits", "Credits", "credits", true],
+      ["teacher", "Teacher", "teacherRef"], ["semester", "Semester", "semester", true],
     ], actions: ["add", "edit", "delete"], columns: ["courseCode", "courseName", "department", "credits", "semester"],
   },
   enrollments: {
@@ -133,7 +136,10 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({});
-  const [referenceOptions, setReferenceOptions] = useState({ students: [], courses: [] });
+  const [referenceOptions, setReferenceOptions] = useState({ students: [], courses: [], teachers: [] });
+  const [teacherOptionsLoading, setTeacherOptionsLoading] = useState(false);
+  const [teacherOptionsError, setTeacherOptionsError] = useState("");
+  const [availableTeacherUsers, setAvailableTeacherUsers] = useState([]);
   const canCreate = role === "admin" ||
     (role === "analyst" && resource === "datasets") ||
     (role === "teacher" && ["attendance", "performance", "support"].includes(resource)) ||
@@ -142,6 +148,17 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
     (role === "analyst" && resource === "datasets");
   const canEditAcademic = role === "teacher" && ["attendance", "performance"].includes(resource);
   const canEditSupport = resource === "support";
+
+  const loadAvailableTeacherUsers = useCallback(async (currentUserId = "") => {
+    try {
+      const { data } = await api.get("/teachers/available-users", {
+        params: currentUserId ? { includeUserId: currentUserId } : {},
+      });
+      setAvailableTeacherUsers(data.data || []);
+    } catch {
+      setAvailableTeacherUsers([]);
+    }
+  }, []);
 
   const loadRecords = useCallback(async () => {
     setLoading(true);
@@ -159,12 +176,15 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
           courses: coursesResponse.data.data || [],
         });
       }
+      if (resource === "teachers" && role === "admin") {
+        await loadAvailableTeacherUsers();
+      }
     } catch (requestError) {
       setError(requestError.response?.data?.message || "Unable to load records from the API.");
     } finally {
       setLoading(false);
     }
-  }, [resource, role]);
+  }, [loadAvailableTeacherUsers, resource, role]);
 
   useEffect(() => { loadRecords(); }, [loadRecords]);
 
@@ -173,13 +193,35 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
     return records.filter((record) => !query || Object.values(record).some((value) => display(value).toLowerCase().includes(query)));
   }, [records, search]);
 
-  const openForm = (record = null) => {
+  const openForm = async (record = null) => {
     setEditing(record);
+    if (resource === "courses") {
+      setTeacherOptionsLoading(true);
+      setTeacherOptionsError("");
+      setReferenceOptions((current) => ({ ...current, teachers: [] }));
+    }
+    if (resource === "teachers" && role === "admin") {
+      const currentUserId = record?.user?._id || record?.user || "";
+      await loadAvailableTeacherUsers(currentUserId);
+    }
     setForm(record ? Object.fromEntries(definition.fields.filter(([key]) => !(resource === "users" && key === "password")).map(([key]) => {
       const value = record[key];
       return [key, value && typeof value === "object" ? value._id || "" : value ?? ""];
     })) : {});
     setDialogOpen(true);
+    if (resource === "courses") {
+      api.get("/teachers")
+        .then(({ data }) => {
+          setReferenceOptions((current) => ({
+            ...current,
+            teachers: (data.data || []).filter((teacher) => teacher.user && teacher.user.isActive !== false),
+          }));
+        })
+        .catch((requestError) => {
+          setTeacherOptionsError(requestError.response?.data?.message || "Unable to load active teachers.");
+        })
+        .finally(() => setTeacherOptionsLoading(false));
+    }
   };
 
   const submitForm = async (event) => {
@@ -250,6 +292,24 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
         <form onSubmit={submitForm}>
           <DialogTitle>{editing ? "Update" : "Add"} {definition.title}</DialogTitle>
           <DialogContent className="resource-form">
+            {resource === "teachers" && (
+              <Box sx={{ mb: 1 }}>
+                {editing ? (
+                  <TextField
+                    fullWidth
+                    label="Teacher ID"
+                    value={editing.teacherId || ""}
+                    InputProps={{ readOnly: true }}
+                    disabled
+                    helperText="System-assigned unique Teacher ID"
+                  />
+                ) : (
+                  <Alert severity="info" sx={{ py: 0.5 }}>
+                    Teacher ID is automatically generated sequentially on save (e.g. TCH-{new Date().getFullYear()}-0001).
+                  </Alert>
+                )}
+              </Box>
+            )}
             {definition.fields
               .map(([key, label, type = "text", required = false, options]) => (
                 (resource === "support" && key === "status" && (!editing || role !== "admin")) ? null :
@@ -265,6 +325,71 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
                       {(resource === "users" && editing ? ["admin", "teacher", "student", "analyst"] : options)
                         .map((option) => <MenuItem key={option} value={option}>{option}</MenuItem>)}
                     </TextField>
+                  ) : type === "credits" || type === "semester" ? (
+                    <TextField
+                      key={key}
+                      select
+                      label={label}
+                      required={required}
+                      value={form[key] ?? ""}
+                      onChange={(event) => setForm({ ...form, [key]: Number(event.target.value) })}
+                    >
+                      {(type === "credits" ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6, 7, 8])
+                        .map((option) => (
+                          <MenuItem key={option} value={option}>
+                            {type === "semester" ? `Semester ${option}` : option}
+                          </MenuItem>
+                        ))}
+                    </TextField>
+                  ) : type === "teacherRef" ? (
+                    <div key={key}>
+                      {teacherOptionsError && <Alert severity="error">{teacherOptionsError}</Alert>}
+                      {!teacherOptionsLoading && !teacherOptionsError && referenceOptions.teachers.length === 0 && (
+                        <Alert severity="info">No active teacher records are available.</Alert>
+                      )}
+                      <Autocomplete
+                        options={referenceOptions.teachers}
+                        loading={teacherOptionsLoading}
+                        value={referenceOptions.teachers.find((item) => item._id === form[key]) || null}
+                        getOptionLabel={(item) => `${item.teacherId} — ${item.name}`}
+                        isOptionEqualToValue={(option, value) => option._id === value._id}
+                        noOptionsText={teacherOptionsLoading ? "Loading teachers..." : "No active teachers found"}
+                        onChange={(_, item) => setForm({ ...form, [key]: item?._id || "" })}
+                        renderInput={(params) => (
+                          <TextField {...params} label={label} error={Boolean(teacherOptionsError)} />
+                        )}
+                      />
+                    </div>
+                  ) : type === "teacherUserRef" ? (
+                    <Autocomplete
+                      key={key}
+                      options={availableTeacherUsers}
+                      disabled={Boolean(editing)}
+                      value={availableTeacherUsers.find((item) => item._id === form[key]) || null}
+                      getOptionLabel={(item) => (item ? `${item.name} (${item.email})` : "")}
+                      isOptionEqualToValue={(option, val) => option._id === (val?._id || val)}
+                      onChange={(_, item) => {
+                        setForm((prev) => ({
+                          ...prev,
+                          [key]: item?._id || "",
+                          name: item?.name || "",
+                          email: item?.email || "",
+                        }));
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label={label}
+                          required={required}
+                          helperText={
+                            !editing && availableTeacherUsers.length === 0
+                              ? "No unassigned teacher accounts found in MongoDB. Create a teacher user in Users first."
+                              : "Select a teacher user account from MongoDB"
+                          }
+                          error={!editing && availableTeacherUsers.length === 0}
+                        />
+                      )}
+                    />
                   ) : type === "studentRef" || type === "courseRef" ? (
                     <Autocomplete
                       key={key}
@@ -286,7 +411,21 @@ export default function ResourcePage({ resource, role, search, onNotify }) {
                       required={required && !(resource === "users" && editing)}
                       value={form[key] ?? ""}
                       onChange={(event) => setForm({ ...form, [key]: event.target.value })}
-                      InputLabelProps={type === "date" ? { shrink: true } : undefined}
+                      InputLabelProps={{
+                        ...(type === "date" ? { shrink: true } : {}),
+                        ...(options?.readOnly || (resource === "teachers" && (key === "name" || key === "email"))
+                          ? { shrink: Boolean(form[key]) }
+                          : {}),
+                      }}
+                      InputProps={{
+                        readOnly: Boolean(options?.readOnly || (resource === "teachers" && (key === "name" || key === "email"))),
+                      }}
+                      disabled={Boolean(options?.readOnly || (resource === "teachers" && (key === "name" || key === "email")))}
+                      helperText={
+                        resource === "teachers" && (key === "name" || key === "email")
+                          ? "Auto-populated from selected user account (read-only)"
+                          : undefined
+                      }
                     />
                   )
             ))}
