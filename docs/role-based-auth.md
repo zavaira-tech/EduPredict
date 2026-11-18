@@ -6,6 +6,21 @@ teacher, or analyst account creation. All registered users sign in through
 `POST /api/auth/login`. Protected requests validate the JWT and current MongoDB
 account, and role changes or password resets invalidate existing tokens.
 
+## Database-backed lookup options
+
+Authenticated forms use `GET /api/lookups/:type` for searchable, paginated
+reference options. Results include only the fields needed by the selector.
+Student and course choices follow the caller's existing record scope; teacher
+choices include active profiles only; user-account choices are administrator
+only and exclude inactive accounts. Use `search`, `page`, and `limit` for
+large result sets.
+
+EduPredict currently has no Department model or Department collection
+relationship. Department options are derived from existing string values on
+Student, Teacher, and Course records; they are not MongoDB ObjectId references.
+Program, academic-year, grade, alert-type, and dataset-file-type choices are
+also derived from existing records where the schema has no master-data model.
+
 Administrators can create teacher and analyst accounts from **Users**. An
 administrator account must be provisioned by a trusted operator; never add a
 public administrator-signup option. To create the first administrator, set

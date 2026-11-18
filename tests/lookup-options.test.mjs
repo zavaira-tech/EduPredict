@@ -41,3 +41,16 @@ test("reference lookups reject invalid pagination before querying MongoDB", asyn
   );
   assert.equal(response.statusCode, 400);
 });
+
+test("academic-record lookups reject malformed reference IDs before querying MongoDB", async () => {
+  const response = mockResponse();
+  await listLookupOptions(
+    {
+      params: { type: "academicRecords" },
+      user: { role: "admin" },
+      query: { studentId: "not-an-object-id", courseId: "also-invalid" },
+    },
+    response,
+  );
+  assert.equal(response.statusCode, 400);
+});

@@ -174,10 +174,13 @@ function getLookupConfig(type, resource, form) {
     academicYearRef: {
       endpoint: "/lookups/academicYears",
       valueField: "value",
-      params: {
-        ...(form.student ? { studentId: form.student } : {}),
-        ...(form.course ? { courseId: form.course } : {}),
-      },
+      params: ["attendance", "performance"].includes(resource)
+        ? {
+          ...(form.student ? { studentId: form.student } : {}),
+          ...(form.course ? { courseId: form.course } : {}),
+          requireEnrollment: "true",
+        }
+        : {},
       label: (option) => option.label,
       freeSolo: true,
     },

@@ -429,6 +429,7 @@ export default function PredictiveAnalyticsDashboard({ user }) {
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [selectedCourse, setSelectedCourse] = useState(null);
   const [academicRecords, setAcademicRecords] = useState([]);
+  const [academicRecordsLoading, setAcademicRecordsLoading] = useState(false);
   const [predictionType, setPredictionType] = useState("performance");
   const [studentId, setStudentId] = useState("");
   const [courseId, setCourseId] = useState("");
@@ -442,9 +443,6 @@ export default function PredictiveAnalyticsDashboard({ user }) {
     setModelStatusError("");
     const requests = [api.get("/ml/predictions"), api.get("/ml/status")];
     if (canViewMetrics) requests.push(api.get("/ml/evaluation"));
-    if (canGenerate) {
-      requests.push(api.get("/performance"));
-    }
     const results = await Promise.allSettled(requests);
     if (results[0].status === "fulfilled") {
       setPredictions(results[0].value.data.data || []);
@@ -468,15 +466,39 @@ export default function PredictiveAnalyticsDashboard({ user }) {
         setError((current) => current || result.reason.response?.data?.message || "Unable to load model evaluation.");
       }
     }
-    if (canGenerate) {
-      const performanceResult = results[resultIndex];
-      if (performanceResult.status === "fulfilled") setAcademicRecords(performanceResult.value.data.data || []);
-      else setError((current) => current || performanceResult.reason.response?.data?.message || "Unable to load historical performance.");
-    }
     setLoading(false);
   }, [canGenerate, canViewMetrics]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  useEffect(() => {
+    let active = true;
+    if (!canGenerate || predictionType !== "performance" || !studentId || !courseId) {
+      setAcademicRecords([]);
+      setAcademicRecordsLoading(false);
+      return () => { active = false; };
+    }
+
+    setAcademicRecords([]);
+    setAcademicRecordsLoading(true);
+    api.get("/lookups/academicRecords", {
+      params: { studentId, courseId, limit: 100 },
+    })
+      .then(({ data }) => {
+        if (active) setAcademicRecords(data.data || []);
+      })
+      .catch((requestError) => {
+        if (active) {
+          setAcademicRecords([]);
+          setError(requestError.response?.data?.message || "Unable to load historical performance.");
+        }
+      })
+      .finally(() => {
+        if (active) setAcademicRecordsLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [canGenerate, courseId, predictionType, studentId]);
 
   const eligiblePerformanceRecords = useMemo(() => academicRecords.filter((record) =>
     String(record.student?._id || record.student) === studentId &&
@@ -601,14 +623,14 @@ export default function PredictiveAnalyticsDashboard({ user }) {
           )}
           <Button
             variant="contained"
-            disabled={Boolean(busy) || !((predictionType === "course-demand" && courseId) ||
+            disabled={Boolean(busy) || (predictionType === "performance" && academicRecordsLoading) || !((predictionType === "course-demand" && courseId) ||
               (predictionType === "dropout" && studentId) ||
               (predictionType === "performance" && studentId && courseId && eligiblePerformanceRecords.length > 0))}
             onClick={generate}
           >
             {busy === "predict" ? "Generating..." : "Generate prediction"}
           </Button>
-          {predictionType === "performance" && studentId && courseId && eligiblePerformanceRecords.length === 0 && (
+          {predictionType === "performance" && studentId && courseId && !academicRecordsLoading && eligiblePerformanceRecords.length === 0 && (
             <Typography color="text.secondary" variant="body2">
               No performance record is available for {selectedStudent?.studentId || "this student"} in {selectedCourse?.courseCode || "this course"}.
             </Typography>

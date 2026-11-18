@@ -118,9 +118,11 @@ async function validateEntityReferences(
     }
     if (
       fields.semester !== undefined &&
-      (!Number.isInteger(Number(fields.semester)) || Number(fields.semester) < 1)
+      (!Number.isInteger(Number(fields.semester)) ||
+        Number(fields.semester) < 1 ||
+        Number(fields.semester) > 8)
     ) {
-      return "Semester must be a positive whole number.";
+      return "Semester must be a whole number from 1 to 8.";
     }
   }
   if (["students", "teachers"].includes(modelName) && fields.user) {
@@ -276,6 +278,7 @@ const lookupRoles = {
   datasetTypes: ["admin", "analyst"],
   studentStatuses: ["admin"],
   grades: ["admin", "teacher"],
+  academicRecords: ["admin", "teacher", "student", "analyst"],
 };
 
 function escapeRegex(value) {
@@ -326,6 +329,47 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
   }
   let records = [];
   let total = 0;
+
+  if (type === "academicRecords") {
+    if (!isValidId(req.query.studentId) || !isValidId(req.query.courseId)) {
+      return res.status(400).json({ success: false, message: "A valid student and course are required." });
+    }
+    const [studentFilter, courseFilter, performanceFilter] = await Promise.all([
+      scopedFilter(req, "students"),
+      scopedFilter(req, "courses"),
+      scopedFilter(req, "performance"),
+    ]);
+    const [student, course] = await Promise.all([
+      Student.findOne({ $and: [{ _id: req.query.studentId }, studentFilter] }).select("_id"),
+      Course.findOne({ $and: [{ _id: req.query.courseId }, courseFilter] }).select("_id"),
+    ]);
+    if (!student || !course) {
+      return res.status(404).json({ success: false, message: "Student or course not found." });
+    }
+    const filter = {
+      $and: [
+        performanceFilter,
+        { student: student._id, course: course._id },
+        ...(regex ? [{ $or: [{ grade: regex }, { academicYear: regex }] }] : []),
+      ],
+    };
+    const [total, records] = await Promise.all([
+      Performance.countDocuments(filter),
+      Performance.find(filter)
+        .select("_id student course academicYear semester assignmentScore quizScore midtermScore finalScore totalScore grade gpa createdAt")
+        .populate("student", "studentId name")
+        .populate("course", "courseCode courseName")
+        .sort({ createdAt: -1, _id: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+    ]);
+    return res.json({
+      success: true,
+      data: records,
+      pagination: { page, limit, total, pages: Math.ceil(total / limit) },
+    });
+  }
 
   if (
     ["departments", "programs", "academicYears", "alertTypes", "datasetTypes", "studentStatuses", "grades"]
@@ -380,9 +424,14 @@ export const listLookupOptions = asyncHandler(async (req, res) => {
           ...(courseId ? { course: courseId } : {}),
         };
         if (
+          req.query.requireEnrollment === "true" &&
           studentId &&
           courseId &&
-          !(await Enrollment.exists({ student: studentId, course: courseId }))
+          !(await Enrollment.exists({
+            student: studentId,
+            course: courseId,
+            status: { $ne: "dropped" },
+          }))
         ) {
           return res.status(400).json({ success: false, message: "The student is not enrolled in that course." });
         }

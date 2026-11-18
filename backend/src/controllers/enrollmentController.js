@@ -72,7 +72,13 @@ export const createEnrollment = asyncHandler(async (req, res) => {
   if (!references) {
     return res.status(400).json({ success: false, message: "A valid student and course are required." });
   }
-  if (typeof academicYear !== "string" || !academicYear.trim() || !Number.isInteger(Number(semester))) {
+  if (
+    typeof academicYear !== "string" ||
+    !academicYear.trim() ||
+    !Number.isInteger(Number(semester)) ||
+    Number(semester) < 1 ||
+    Number(semester) > 8
+  ) {
     return res.status(400).json({ success: false, message: "Academic year and semester are required." });
   }
   const record = await Enrollment.create({
@@ -109,6 +115,14 @@ export const updateEnrollment = asyncHandler(async (req, res) => {
   const previousCourse = record.course;
   const nextStudent = updates.student ?? record.student;
   const nextCourse = updates.course ?? record.course;
+  if (
+    updates.semester !== undefined &&
+    (!Number.isInteger(Number(updates.semester)) ||
+      Number(updates.semester) < 1 ||
+      Number(updates.semester) > 8)
+  ) {
+    return res.status(400).json({ success: false, message: "Semester must be a whole number from 1 to 8." });
+  }
   if (updates.student !== undefined || updates.course !== undefined) {
     const references = await validateReferences(nextStudent, nextCourse);
     if (!references) {
@@ -116,7 +130,7 @@ export const updateEnrollment = asyncHandler(async (req, res) => {
     }
   }
   for (const key of ["academicYear", "semester", "enrolledAt", "status"]) {
-    if (updates[key] !== undefined) record[key] = updates[key];
+    if (updates[key] !== undefined) record[key] = key === "semester" ? Number(updates[key]) : updates[key];
   }
   if (updates.student !== undefined) record.student = nextStudent;
   if (updates.course !== undefined) record.course = nextCourse;
